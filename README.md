@@ -15,8 +15,8 @@ We use a baseline model (**Model A**) and compare it against three modified vers
 ### Evaluation
 
 Each model is evaluated over multiple runs (e.g., 1000 trials). For each run, the Mean Squared Error (MSE) is recorded. Final evaluation is based on:
-`-	Median MSE: performance measure`
-`-	IQR of MSE: robustness and consistency indicator`
+`•	Median MSE: performance measure`  
+`•	IQR of MSE: robustness and consistency indicator`
 
 ## Requirements
 
