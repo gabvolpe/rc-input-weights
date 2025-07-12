@@ -20,5 +20,5 @@ Each model is evaluated over multiple runs (e.g., 1000 trials). For each run, th
 
 ## Requirements
 
-Install the required dependencies using:
+Install the required dependencies using:  
 `pip install -r requirements.txt`
