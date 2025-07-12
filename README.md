@@ -1,6 +1,6 @@
 # Read-in Weight Matrix Sensitivity Experiments
 
-This repository contains code for a set of three experiments evaluating how changes to the read-in weight matrix of a Reservoir Computin (RC) affect model performance across three distinct systems: Sine Wave, Mackey-Glass, Lorenz.
+This repository contains code for a set of three experiments evaluating how changes to the read-in weight matrix of a Reservoir Computing (RC) affect model performance across three distinct systems: Sine Wave, Mackey-Glass, Lorenz.
 
 ## Overview
 
