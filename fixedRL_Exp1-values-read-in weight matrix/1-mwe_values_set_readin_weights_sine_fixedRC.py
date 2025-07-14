@@ -104,7 +104,7 @@ def main():
     # }
     # create loss dictionary for each readin weights method
     losses = {"outer_trial": np.zeros(args.n_trials**2)}  # let's keep the info about the outer trial
-    losses["Baseline"] = np.zeros(args.n_trials**2)  # for the baseline model
+    losses["Baseline"] = np.zeros((args.n_trials**2, len(metrics)))  # for the baseline model
     for method in weight_methods.keys():
         losses[method] = np.zeros((args.n_trials**2, len(metrics)))  # for each method, we store the losses for each metric
 
@@ -134,8 +134,7 @@ def main():
                 _model.fit(X_train, y_train)
                 _loss_bsl = _model.evaluate(X_test, y_test, 
                                             metrics=metrics.keys())
-            # append loss to the losses dict based on the keys
-            losses["Baseline"][i] = _loss_bsl[0]
+            losses["Baseline"][i] = _loss_bsl
 
             # now loop through the different read-in weights methods,
             # compute losses and store them
@@ -159,27 +158,29 @@ def main():
     Post-processing the trials
     """
 
+    # just to simplyfy the code, we will create a list of metrics names
+    metrics_list = list(metrics.keys())
+
     # A: global summary of the losses per weight method
     for _method, _losses in losses.items():
         if _method == "outer_trial":
             continue
 
-        # compute median and IQR for each method 
+        # compute median and IQR for each metric stored in the metrics dict
+
         # (across different reservoirs)
-        for _idx_metric in range(len(metrics.items())):
-            
+        for _idx_metric, _metric in enumerate(metrics_list):
             median, iqr = compute_median_and_iqr_loss(_losses[:, _idx_metric])
 
-            metric = metrics.keys()[_idx_metric]
-            print(f"{_method} - {metric}: Median = {median:.6f}, IQR = {iqr:.6f}")
+            print(f"{_method} - {_metric}: Median = {median:.6f}, IQR = {iqr:.6f}")
 
     # B: summary per outer trial (i.e. for each reservoir)
 
      # create a summary post-processing dict (summarizing across inner trials)
     summary = {}
     summary["Baseline"] = {"median": [], "iqr": []}
-    for method in weight_methods.keys():
-        for metric in metrics.keys():
+    for method in list(weight_methods.keys()):
+        for metric in metrics_list:
             summary[method][metric] = {"median": [], "iqr": []}
 
 
