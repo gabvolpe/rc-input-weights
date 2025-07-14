@@ -5,86 +5,50 @@ No zeros or close-to zero values are allowed in the read-in matrix.
 No extra fraction input: fraction_input=1.0'''
 
 import os
+import sys
+import copy
+import pickle
+from matplotlib import pyplot as plt
 import numpy as np
 from pyreco.custom_models import RC
 from pyreco.layers import InputLayer, ReadoutLayer, RandomReservoirLayer
 from pyreco.utils_data import sequence_to_scalar
 from pyreco.optimizers import RidgeSK
+from pyreco.metrics import r2, mae, mse
 import time
 import argparse
 from openpyxl import load_workbook, Workbook
 
+
+# as its not a library, we need to add the parent directory to the path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from helper_files.utils import create_weights
+from helper_files.utils import compute_median_and_iqr_loss
+
+
 def create_base_model(input_shape, output_shape):
     model = RC()
     model.add(InputLayer(input_shape=input_shape))
-    model.add(RandomReservoirLayer(nodes=200, density=0.1, activation="tanh", leakage_rate=0.1, fraction_input=1.0)) # no fraction_input
+    model.add(RandomReservoirLayer(nodes=200, 
+                                   density=0.1, 
+                                   activation="tanh", 
+                                   leakage_rate=0.1, 
+                                   fraction_input=1.0)) # no fraction_input
     model.add(ReadoutLayer(output_shape, fraction_out=1.0)) #fraction_out either 1.0 or 0.5
     optim = RidgeSK(alpha=0.5)
     model.compile(optimizer=optim, metrics=["mean_squared_error"])
     return model
 
-def create_weights(shape, method):
-    threshold = 1e-3
-    if method == "random_normal":
-        w = np.random.randn(*shape)
-        while np.any(np.abs(w) < threshold):
-            idx = np.abs(w) < threshold
-            w[idx] = np.random.randn(np.sum(idx))
-        return w
 
-    elif method == "laplace":
-        w = np.random.laplace(loc=0.0, scale=0.5, size=shape).flatten()
-        while np.any(np.abs(w) < threshold):
-            idx = np.abs(w) < threshold
-            w[idx] = np.random.laplace(loc=0.0, scale=0.5, size=np.sum(idx))
-        return w.reshape(shape)
 
-    elif method == "fourier":
-        num_weights = shape[0]
-        max_freq = 10
-        t = np.linspace(0, 1, num_weights).reshape(-1, 1)
-        frequencies = np.random.uniform(0, max_freq, size=(num_weights, 1))
-        phases = np.random.uniform(0, 2*np.pi, size=(num_weights, 1))
-        weights = np.sin(2*np.pi*frequencies*t + phases) + np.cos(2*np.pi*frequencies*t + phases)
-        weights = 0.5 * weights / np.max(np.abs(weights))
-        weights = weights.flatten()
-
-        # Fix: use np.where to get indices where weights are small
-        while np.any(np.abs(weights) < threshold):
-            idxs = np.where(np.abs(weights) < threshold)[0]
-
-            # Regenerate frequencies and phases for these indices only
-            frequencies[idxs, 0] = np.random.uniform(0, max_freq, size=len(idxs))
-            phases[idxs, 0] = np.random.uniform(0, 2*np.pi, size=len(idxs))
-
-            # Recompute weights at these indices
-            # Since t is shape (num_weights, 1), we can index t[idxs, 0] to get scalar t values for each idx
-            weights_temp = (
-                np.sin(2*np.pi*frequencies[idxs, 0] * t[idxs, 0] + phases[idxs, 0]) +
-                np.cos(2*np.pi*frequencies[idxs, 0] * t[idxs, 0] + phases[idxs, 0])
-            )
-            # Normalize partial weights by max absolute weight from full weights array
-            max_abs = np.max(np.abs(weights))
-            weights[idxs] = 0.5 * weights_temp / max_abs
-
-        return weights.reshape(shape)
-
-    else:
-        raise ValueError(f"Unknown weight initialization method: {method}")
-
-def compute_median_and_iqr(losses):
-    numeric_losses = np.array([x for x in losses if isinstance(x, (int, float, np.float32, np.float64))])
-    if len(numeric_losses) == 0:
-        return None, None
-    median = np.median(numeric_losses)
-    q75, q25 = np.percentile(numeric_losses, [75, 25])
-    iqr = q75 - q25
-    return median, iqr
 
 def main():
     parser = argparse.ArgumentParser(description="Run RC model with read-in weights variations.")
     parser.add_argument('--task', type=str, default='sine_prediction', help='Task name')
-    parser.add_argument('--n_trials', type=int, default=1000, help='Number of trials')
+    parser.add_argument('--n_trials', type=int, default=10, help='Number of trials')
     args = parser.parse_args()
 
     if args.task == "sine_prediction":
@@ -94,12 +58,23 @@ def main():
             n_batch=200,
             n_time_in=20,
         )
+        input_shape = (X_train.shape[1], X_train.shape[2])
+        output_shape = (y_train.shape[1], y_train.shape[2])
     else:
         raise NotImplementedError(f"Task {args.task} not implemented")
+    
+    # dict of ways to create the read-in weights (random normal, laplace, fourier, ...)
+    weight_methods = {
+        "RandomUniform": "random_uniform",
+        "RandomNormal": "random_normal",
+        "Laplace": "laplace",
+        "Fourier": "fourier",
+    }
 
-    input_shape = (X_train.shape[1], X_train.shape[2])
-    output_shape = (y_train.shape[1], y_train.shape[2])
+    # dict of error metrics to track. Keys should match the model's compile metrics
+    metrics = {"r2": r2, "mae": mae, "mse": mse}  
 
+    # a bit of excel stuff
     excel_path = os.path.join(os.getcwd(), 'Losses_Read-in_FixedRL.xlsx')
     print(excel_path)
     sheet_name_median = 'Exp1_Sine Wave_Median'
@@ -120,55 +95,128 @@ def main():
     else:
         ws_iqr = wb.create_sheet(title=sheet_name_iqr)
 
-    # Prepare data structures to store losses: Each method will have a 2D list: [outer_trial][inner_trial]
-    losses = {
-        "Old": [],
-        "New": [],
-        "Laplace": [],
-        "Fourier": []
-    }
+    # # Prepare data structures to store losses: Each method will have a 2D list: [outer_trial][inner_trial]
+    # losses = {
+    #     "Old": [],
+    #     "New": [],
+    #     "Laplace": [],
+    #     "Fourier": []
+    # }
+    # create loss dictionary for each readin weights method
+    losses = {"outer_trial": np.zeros(args.n_trials**2)}  # let's keep the info about the outer trial
+    losses["Baseline"] = np.zeros(args.n_trials**2)  # for the baseline model
+    for method in weight_methods.keys():
+        losses[method] = np.zeros((args.n_trials**2, len(metrics)))  # for each method, we store the losses for each metric
+
 
     start_time = time.time()
-
+    i = 0 # iteration counter for the losses dict
     for trial_outer in range(args.n_trials):
         print(f"Outer Trial {trial_outer+1}/{args.n_trials} - Creating fresh model")
+        
+        # create a based RC model using a random reservoir layer
         model_rc = create_base_model(input_shape, output_shape)
 
-        # Store losses for inner trials in this outer trial
-        losses["Old"].append([])
-        losses["New"].append([])
-        losses["Laplace"].append([])
-        losses["Fourier"].append([])
-
+        # inner trial: vary the read-in weights (keeping the reservoir fixed)
         for trial_inner in range(args.n_trials):
-            print(f"  Inner Trial {trial_inner+1}/{args.n_trials}")
+            # now we will vary the read-in weights
+            print(f"\tInner Trial {trial_inner+1}/{args.n_trials}")
 
-            # 1) Old: use model as is (initial weights)
-            model_rc.fit(X_train, y_train)
-            loss_old = model_rc.evaluate(X_test, y_test, metrics=["mae"])[0]
-            losses["Old"][trial_outer].append(loss_old)
+            # update outer trial index in the losses dict
+            losses["outer_trial"][i] = trial_outer
 
-            # 2) New: random normal weights
-            new_weights = create_weights((200,1), "random_normal")
-            model_rc._set_readin_weights(new_weights)
-            model_rc.fit(X_train, y_train)
-            loss_new = model_rc.evaluate(X_test, y_test, metrics=["mae"])[0]
-            losses["New"][trial_outer].append(loss_new)
+            # create a clean copy for every inner trial
+            _model = copy.deepcopy(model_rc)
 
-            # 3) Laplace weights
-            laplace_weights = create_weights((200,1), "laplace")
-            model_rc._set_readin_weights(laplace_weights)
-            model_rc.fit(X_train, y_train)
-            loss_laplace = model_rc.evaluate(X_test, y_test, metrics=["mae"])[0]
-            losses["Laplace"][trial_outer].append(loss_laplace)
+            # obtain the baseline results (we only need this once, nothing 
+            # changes here in the inner trials)
+            if trial_inner == 0:
+                _model.fit(X_train, y_train)
+                _loss_bsl = _model.evaluate(X_test, y_test, 
+                                            metrics=metrics.keys())
+            # append loss to the losses dict based on the keys
+            losses["Baseline"][i] = _loss_bsl[0]
 
-            # 4) Fourier weights
-            fourier_weights = create_weights((200,1), "fourier")
-            model_rc._set_readin_weights(fourier_weights)
-            model_rc.fit(X_train, y_train)
-            loss_fourier = model_rc.evaluate(X_test, y_test, metrics=["mae"])[0]
-            losses["Fourier"][trial_outer].append(loss_fourier)
-    
+            # now loop through the different read-in weights methods,
+            # compute losses and store them
+            for method, method_name in weight_methods.items():
+                print(f"\t\tUsing {method_name} weights")
+                readin_weights = create_weights((200, 1), method_name)
+                _model._set_readin_weights(readin_weights)
+                _model.fit(X_train, y_train)
+                _loss = _model.evaluate(X_test, y_test, metrics=metrics.keys())
+                losses[method][i] = _loss
+                del _loss
+            
+            del _model
+            i += 1
+
+    # we should save the results to a pickle file
+    with open('losses.pkl', 'wb') as f:
+        pickle.dump(losses, f)
+
+    """
+    Post-processing the trials
+    """
+
+    # A: global summary of the losses per weight method
+    for _method, _losses in losses.items():
+        if _method == "outer_trial":
+            continue
+
+        # compute median and IQR for each method 
+        # (across different reservoirs)
+        for _metric, _metric_name in metrics.items():
+            median, iqr = compute_median_and_iqr_loss(_losses[:, _metric])
+            print(f"{_method} - {_metric_name}: Median = {median:.6f}, IQR = {iqr:.6f}")
+
+    # B: summary per outer trial (i.e. for each reservoir)
+
+
+
+
+    # create a summary post-processing dict (summarizing across inner trials)
+    summary = {}
+    summary["Baseline"] = {"median": [], "iqr": []}
+    for method in weight_methods.keys():
+        summary[method] = {"median": [], "iqr": []}
+            # Write to Excel
+            col_median = 1 + list(weight_methods.keys()).index(_method) if _method != "Baseline" else 1
+            col_iqr = col_median + len(weight_methods)
+
+    # compute median and IQR for each method
+    idx_outer = losses["outer_trial"] == trial_outer
+
+        for 
+
+        for method, method_name in weight_methods.items():
+            for _idx_metric in range(len(metrics)):
+                # compute median and IQR for the current method and metric
+                median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer, _idx_metric])
+                
+                # Write median and IQR to Excel
+                col_median = 1 + list(weight_methods.keys()).index(method)
+            median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer])
+
+
+   
+
+
+
+
+
+        # lets make a simple figure of the historgram of the losses
+        plt.figure(figsize=(10, 6))
+        plt.axvline(losses["Old"][trial_outer][0], label='Old Model')
+        plt.hist(losses["New"][trial_outer], bins=30, alpha=0.5, label='Random Normal')
+        plt.hist(losses["Laplace"][trial_outer], bins=30, alpha=0.5, label='Laplace Model')
+        plt.hist(losses["Fourier"][trial_outer], bins=30, alpha=0.5, label='Fourier Model')
+        plt.title(f'Loss Distribution for Outer Trial {trial_outer + 1}')
+        plt.xlabel('Loss (MAE)')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.show()
+
         # Row in Excel for this outer trial
         summary_row = 1 + trial_outer  # Assuming no header, otherwise write 2 instead of 1
 
@@ -184,7 +232,7 @@ def main():
 
         for method, col in model_columns.items():
             all_losses_flat = losses[method][trial_outer]  # losses for this outer trial
-            median, iqr = compute_median_and_iqr(all_losses_flat)
+            median, iqr = compute_median_and_iqr_loss(all_losses_flat)
 
             # Write median and IQR for this outer trial to Excel
             ws_m.cell(row=summary_row, column=col, value=median)
