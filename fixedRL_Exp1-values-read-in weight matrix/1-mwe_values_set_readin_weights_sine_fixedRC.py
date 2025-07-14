@@ -166,37 +166,55 @@ def main():
 
         # compute median and IQR for each method 
         # (across different reservoirs)
-        for _metric, _metric_name in metrics.items():
-            median, iqr = compute_median_and_iqr_loss(_losses[:, _metric])
-            print(f"{_method} - {_metric_name}: Median = {median:.6f}, IQR = {iqr:.6f}")
+        for _idx_metric in range(len(metrics.items())):
+            
+            median, iqr = compute_median_and_iqr_loss(_losses[:, _idx_metric])
+
+            metric = metrics.keys()[_idx_metric]
+            print(f"{_method} - {metric}: Median = {median:.6f}, IQR = {iqr:.6f}")
 
     # B: summary per outer trial (i.e. for each reservoir)
 
-
-
-
-    # create a summary post-processing dict (summarizing across inner trials)
+     # create a summary post-processing dict (summarizing across inner trials)
     summary = {}
     summary["Baseline"] = {"median": [], "iqr": []}
     for method in weight_methods.keys():
-        summary[method] = {"median": [], "iqr": []}
-            # Write to Excel
-            col_median = 1 + list(weight_methods.keys()).index(_method) if _method != "Baseline" else 1
-            col_iqr = col_median + len(weight_methods)
+        for metric in metrics.keys():
+            summary[method][metric] = {"median": [], "iqr": []}
 
-    # compute median and IQR for each method
-    idx_outer = losses["outer_trial"] == trial_outer
 
-        for 
+    for trial_outer in range(args.n_trials):
+        idx_outer = losses["outer_trial"] == trial_outer
 
-        for method, method_name in weight_methods.items():
-            for _idx_metric in range(len(metrics)):
-                # compute median and IQR for the current method and metric
-                median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer, _idx_metric])
+        for _method, _losses in losses.items():
+            if _method == "outer_trial":
+                continue
+
+            for _idx_metric in range(len(metrics.items())):
+                median, iqr = compute_median_and_iqr_loss(_losses[idx_outer, _idx_metric])
+
+                _metric = metrics.keys()[_idx_metric]
+                summary[_method][_metric]["median"].append(median)
+                summary[_method][_metric]["iqr"].append(iqr)
+
+   
+    #         # Write to Excel
+    #         col_median = 1 + list(weight_methods.keys()).index(_method) if _method != "Baseline" else 1
+    #         col_iqr = col_median + len(weight_methods)
+
+    # # compute median and IQR for each method
+    # idx_outer = losses["outer_trial"] == trial_outer
+
+    #     for 
+
+    #     for method, method_name in weight_methods.items():
+    #         for _idx_metric in range(len(metrics)):
+    #             # compute median and IQR for the current method and metric
+    #             median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer, _idx_metric])
                 
-                # Write median and IQR to Excel
-                col_median = 1 + list(weight_methods.keys()).index(method)
-            median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer])
+    #             # Write median and IQR to Excel
+    #             col_median = 1 + list(weight_methods.keys()).index(method)
+    #         median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer])
 
 
    
@@ -205,44 +223,44 @@ def main():
 
 
 
-        # lets make a simple figure of the historgram of the losses
-        plt.figure(figsize=(10, 6))
-        plt.axvline(losses["Old"][trial_outer][0], label='Old Model')
-        plt.hist(losses["New"][trial_outer], bins=30, alpha=0.5, label='Random Normal')
-        plt.hist(losses["Laplace"][trial_outer], bins=30, alpha=0.5, label='Laplace Model')
-        plt.hist(losses["Fourier"][trial_outer], bins=30, alpha=0.5, label='Fourier Model')
-        plt.title(f'Loss Distribution for Outer Trial {trial_outer + 1}')
-        plt.xlabel('Loss (MAE)')
-        plt.ylabel('Frequency')
-        plt.legend()
-        plt.show()
+    #     # lets make a simple figure of the historgram of the losses
+    #     plt.figure(figsize=(10, 6))
+    #     plt.axvline(losses["Old"][trial_outer][0], label='Old Model')
+    #     plt.hist(losses["New"][trial_outer], bins=30, alpha=0.5, label='Random Normal')
+    #     plt.hist(losses["Laplace"][trial_outer], bins=30, alpha=0.5, label='Laplace Model')
+    #     plt.hist(losses["Fourier"][trial_outer], bins=30, alpha=0.5, label='Fourier Model')
+    #     plt.title(f'Loss Distribution for Outer Trial {trial_outer + 1}')
+    #     plt.xlabel('Loss (MAE)')
+    #     plt.ylabel('Frequency')
+    #     plt.legend()
+    #     plt.show()
 
-        # Row in Excel for this outer trial
-        summary_row = 1 + trial_outer  # Assuming no header, otherwise write 2 instead of 1
+    #     # Row in Excel for this outer trial
+    #     summary_row = 1 + trial_outer  # Assuming no header, otherwise write 2 instead of 1
 
-        # Define model name to column index mapping
-        model_columns = {
-            "Old": 1,
-            "New": 2,
-            "Laplace": 3,
-            "Fourier": 4
-        }
+    #     # Define model name to column index mapping
+    #     model_columns = {
+    #         "Old": 1,
+    #         "New": 2,
+    #         "Laplace": 3,
+    #         "Fourier": 4
+    #     }
 
-        print(f"\n==== Outer Trial {trial_outer + 1} Summary ====")
+    #     print(f"\n==== Outer Trial {trial_outer + 1} Summary ====")
 
-        for method, col in model_columns.items():
-            all_losses_flat = losses[method][trial_outer]  # losses for this outer trial
-            median, iqr = compute_median_and_iqr_loss(all_losses_flat)
+    #     for method, col in model_columns.items():
+    #         all_losses_flat = losses[method][trial_outer]  # losses for this outer trial
+    #         median, iqr = compute_median_and_iqr_loss(all_losses_flat)
 
-            # Write median and IQR for this outer trial to Excel
-            ws_m.cell(row=summary_row, column=col, value=median)
-            ws_iqr.cell(row=summary_row, column=col, value=iqr)
+    #         # Write median and IQR for this outer trial to Excel
+    #         ws_m.cell(row=summary_row, column=col, value=median)
+    #         ws_iqr.cell(row=summary_row, column=col, value=iqr)
 
-            # Print the summary
-            print(f"{method} Model — Median MAE: {median:.6f}, IQR: {iqr:.6f}")
+    #         # Print the summary
+    #         print(f"{method} Model — Median MAE: {median:.6f}, IQR: {iqr:.6f}")
             
-            wb.save(excel_path)
-    end_time = time.time()
+    #         wb.save(excel_path)
+    # end_time = time.time()
     print(f"\nTotal time taken: {end_time - start_time:.2f} seconds")
 
 if __name__ == "__main__":
