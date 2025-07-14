@@ -4,7 +4,7 @@ This repository contains code for a set of three experiments evaluating how chan
 
 ## Overview
 
-We use a baseline model (**Model A**) and compare it against three modified versions (**Models B, C, and D**) that differ only in the design of the read-in matrix. Each of the three experiments is conducted on a different system, with the goal of analyzing how architectural changes in the read-in weight matrix influence overall performance and robustness. All experiments are run by keeping the reservoir structure and all hyperparameters than the read-in matrix fixed. Inside the `helper files` folder there are the python files to evaluate and plot the experiments.
+We use a baseline model (**Model A**) and compare it against three modified versions (**Models B, C, and D**) that differ only in the design of the read-in matrix. Each of the three experiments is conducted on the three systems, with the goal of analyzing how architectural changes in the read-in weight matrix influence overall performance and robustness. All experiments are run by keeping the reservoir structure and all hyperparameters than the read-in matrix fixed. Inside the `helper files` folder there are the python files to evaluate and plot the experiments.
 
 ### Goals
 
