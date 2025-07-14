@@ -138,7 +138,7 @@ def main():
 
     start_time = time.time()
 
-    for outer in range(100): #n_trials
+    for outer in range(n_trials): 
         print(f"\n--- Outer Trial {outer + 1}/{args.n_trials} ---")
         # Create fresh model for each outer trial
         model = create_base_model(input_shape, output_shape)
