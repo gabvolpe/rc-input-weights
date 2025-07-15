@@ -4,7 +4,12 @@ def create_weights(shape: tuple, method: str, threshold: float = 1e-3):
     """
     Excludes any values below the absolute threshold.
     """
-    if method == "random_uniform":
+
+    if method == "baseline":
+        # random normal withouth clipping small values
+        w = np.random.uniform(-1, 1, size=shape)
+        return w
+    elif method == "random_uniform":
         w = np.random.uniform(-1, 1, size=shape)
         while np.any(np.abs(w) < threshold):
             idx = np.abs(w) < threshold

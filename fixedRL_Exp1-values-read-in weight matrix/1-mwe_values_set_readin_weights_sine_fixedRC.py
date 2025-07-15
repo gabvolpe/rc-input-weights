@@ -65,6 +65,7 @@ def main():
     
     # dict of ways to create the read-in weights (random normal, laplace, fourier, ...)
     weight_methods = {
+        "Baseline": "baseline",  
         "RandomUniform": "random_uniform",
         "RandomNormal": "random_normal",
         "Laplace": "laplace",
@@ -74,26 +75,26 @@ def main():
     # dict of error metrics to track. Keys should match the model's compile metrics
     metrics = {"r2": r2, "mae": mae, "mse": mse}  
 
-    # a bit of excel stuff
-    excel_path = os.path.join(os.getcwd(), 'Losses_Read-in_FixedRL.xlsx')
-    print(excel_path)
-    sheet_name_median = 'Exp1_Sine Wave_Median'
-    sheet_name_iqr = 'Exp1_Sine Wave_IQR'
+    # # a bit of excel stuff
+    # excel_path = os.path.join(os.getcwd(), 'Losses_Read-in_FixedRL.xlsx')
+    # print(excel_path)
+    # sheet_name_median = 'Exp1_Sine Wave_Median'
+    # sheet_name_iqr = 'Exp1_Sine Wave_IQR'
 
-    try:
-        wb = load_workbook(excel_path)
-    except FileNotFoundError:
-        wb = Workbook()
+    # try:
+    #     wb = load_workbook(excel_path)
+    # except FileNotFoundError:
+    #     wb = Workbook()
 
-    if sheet_name_median in wb.sheetnames:
-        ws_m = wb[sheet_name_median]
-    else:
-        ws_m = wb.create_sheet(title=sheet_name_median)
+    # if sheet_name_median in wb.sheetnames:
+    #     ws_m = wb[sheet_name_median]
+    # else:
+    #     ws_m = wb.create_sheet(title=sheet_name_median)
 
-    if sheet_name_iqr in wb.sheetnames:
-        ws_iqr = wb[sheet_name_iqr]
-    else:
-        ws_iqr = wb.create_sheet(title=sheet_name_iqr)
+    # if sheet_name_iqr in wb.sheetnames:
+    #     ws_iqr = wb[sheet_name_iqr]
+    # else:
+    #     ws_iqr = wb.create_sheet(title=sheet_name_iqr)
 
     # # Prepare data structures to store losses: Each method will have a 2D list: [outer_trial][inner_trial]
     # losses = {
@@ -102,15 +103,15 @@ def main():
     #     "Laplace": [],
     #     "Fourier": []
     # }
+
     # create loss dictionary for each readin weights method
     losses = {"outer_trial": np.zeros(args.n_trials**2)}  # let's keep the info about the outer trial
-    losses["Baseline"] = np.zeros((args.n_trials**2, len(metrics)))  # for the baseline model
     for method in weight_methods.keys():
         losses[method] = np.zeros((args.n_trials**2, len(metrics)))  # for each method, we store the losses for each metric
 
 
     start_time = time.time()
-    i = 0 # iteration counter for the losses dict
+    i = 0  # iteration counter for the losses dict
     for trial_outer in range(args.n_trials):
         print(f"Outer Trial {trial_outer+1}/{args.n_trials} - Creating fresh model")
         
@@ -127,14 +128,6 @@ def main():
 
             # create a clean copy for every inner trial
             _model = copy.deepcopy(model_rc)
-
-            # obtain the baseline results (we only need this once, nothing 
-            # changes here in the inner trials)
-            if trial_inner == 0:
-                _model.fit(X_train, y_train)
-                _loss_bsl = _model.evaluate(X_test, y_test, 
-                                            metrics=metrics.keys())
-            losses["Baseline"][i] = _loss_bsl
 
             # now loop through the different read-in weights methods,
             # compute losses and store them
@@ -158,9 +151,6 @@ def main():
     Post-processing the trials
     """
 
-    # just to simplyfy the code, we will create a list of metrics names
-    metrics_list = list(metrics.keys())
-
     # A: global summary of the losses per weight method
     for _method, _losses in losses.items():
         if _method == "outer_trial":
@@ -169,7 +159,7 @@ def main():
         # compute median and IQR for each metric stored in the metrics dict
 
         # (across different reservoirs)
-        for _idx_metric, _metric in enumerate(metrics_list):
+        for _idx_metric, _metric in enumerate(list(metrics.keys())):
             median, iqr = compute_median_and_iqr_loss(_losses[:, _idx_metric])
 
             print(f"{_method} - {_metric}: Median = {median:.6f}, IQR = {iqr:.6f}")
@@ -178,50 +168,35 @@ def main():
 
      # create a summary post-processing dict (summarizing across inner trials)
     summary = {}
-    summary["Baseline"] = {"median": [], "iqr": []}
     for method in list(weight_methods.keys()):
-        for metric in metrics_list:
+        summary[method] = {}
+        for idx_metric, metric in enumerate(list(metrics.keys())):
             summary[method][metric] = {"median": [], "iqr": []}
 
+            for trial_outer in range(args.n_trials):
+                idx_outer = losses["outer_trial"] == trial_outer
 
-    for trial_outer in range(args.n_trials):
-        idx_outer = losses["outer_trial"] == trial_outer
+                # compute summary statistics for each method and metric per outer trial
+                median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer, idx_metric])
 
-        for _method, _losses in losses.items():
-            if _method == "outer_trial":
-                continue
+                summary[method][metric]["median"].append(median)
+                summary[method][metric]["iqr"].append(iqr)
 
-            for _idx_metric in range(len(metrics.items())):
-                median, iqr = compute_median_and_iqr_loss(_losses[idx_outer, _idx_metric])
+    
 
-                _metric = metrics.keys()[_idx_metric]
-                summary[_method][_metric]["median"].append(median)
-                summary[_method][_metric]["iqr"].append(iqr)
+    # now we can analyse the results
 
-   
-    #         # Write to Excel
-    #         col_median = 1 + list(weight_methods.keys()).index(_method) if _method != "Baseline" else 1
-    #         col_iqr = col_median + len(weight_methods)
-
-    # # compute median and IQR for each method
-    # idx_outer = losses["outer_trial"] == trial_outer
-
-    #     for 
-
-    #     for method, method_name in weight_methods.items():
-    #         for _idx_metric in range(len(metrics)):
-    #             # compute median and IQR for the current method and metric
-    #             median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer, _idx_metric])
-                
-    #             # Write median and IQR to Excel
-    #             col_median = 1 + list(weight_methods.keys()).index(method)
-    #         median, iqr = compute_median_and_iqr_loss(losses[method][idx_outer])
-
-
-   
-
-
-
+    # box plot of the mean MSE losses for each method
+    plt.figure(figsize=(10, 6))
+    box_data = [summary[method]['mse']['median'] for method in weight_methods.keys()]
+    plt.boxplot(box_data, tick_labels=list(weight_methods.keys()))  # Exclude "outer_trial" from labels
+    plt.title('Box Plot of Mean MSE Losses for Different Read-in Weights Methods')
+    plt.ylabel('Mean MSE Loss')
+    plt.xlabel('Read-in Weights Method')
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
     #     # lets make a simple figure of the historgram of the losses
