@@ -45,7 +45,7 @@ def create_base_model(input_shape, output_shape):
 
 def main():
     parser = argparse.ArgumentParser(description="Run RC model with read-in weights variations.")
-    parser.add_argument('--n_trials', type=int, default=10, help='Number of trials')
+    parser.add_argument('--n_trials', type=int, default=200, help='Number of trials')
     args = parser.parse_args()
 
 
@@ -59,13 +59,13 @@ def main():
     output_shape = (y_train.shape[1], y_train.shape[2])
 
     # grid of clipping values to test
-    thresholds = np.linspace(0.0001, 0.9, 20)  # from 0.0001 to 0.9 in 20 steps
+    thresholds = np.linspace(0.000001, 0.99, 20)  # from 0.0001 to 0.9 in 20 steps
 
     # dict of ways to create the read-in weights (random normal, laplace, fourier, ...)
     weight_methods = {
         "RandomUniform": "random_uniform",
-        # "RandomNormal": "random_normal",
-        # "Laplace": "laplace",
+        "RandomNormal": "random_normal",
+        "Laplace": "laplace",
     }
 
     # error metric to use
@@ -106,15 +106,16 @@ def main():
     # evaluate the losses as a function of the clipping threshold
 
     # plot of the box plots over the clipping thresholds
-    fig, ax = plt.subplots(figsize=(10, 6))
-    method_name = "RandomUniform"  # just for the legend
-    box_data = [losses[method_name][i, :] for i in range(len(thresholds))]
-    ax.boxplot(box_data, positions=thresholds, widths=0.05,) # tick_labels=[method_name])
-    ax.set_xlabel("Clipping Threshold")
-    ax.set_ylabel(metric)
-    ax.set_title("Effect of Clipping Threshold on Model Performance")
-    ax.legend()
-    plt.show()
+    for method_name in list(weight_methods.keys()):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        box_data = [losses[method_name][i, :] for i in range(len(thresholds))]
+        ax.boxplot(box_data, positions=thresholds, widths=0.05,) # tick_labels=[method_name])
+        ax.set_xlabel("Clipping Threshold")
+        ax.set_ylabel(metric)
+        ax.set_title("Effect of Clipping Threshold on Model Performance, Method: " + method_name)
+        ax.legend()
+        plt.savefig(f"clipping_threshold_effect_{method_name}.png")
+        plt.show()
 
 if __name__ == "__main__":
     main()
