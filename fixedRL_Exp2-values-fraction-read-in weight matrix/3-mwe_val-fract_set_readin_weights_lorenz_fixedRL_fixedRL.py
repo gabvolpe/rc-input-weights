@@ -104,6 +104,7 @@ def generate_fourier_weights(n_nodes, n_inputs, max_freq=10, threshold=1e-3):
     return input_fourier_weights
 
 
+# --- Main program ---
 
 def main():
     import os
@@ -111,7 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test CustomModel API on Lorenz data")
     parser.add_argument("--task", default="sequence2sequence", choices=["sequence2sequence", "vector2vector"])
     parser.add_argument("--n_trials", default=30, type=int, help="Number of outer trials")
-    parser.add_argument("--n_inner_trials", default=1000, type=int, help="Number of inner trials")
+    parser.add_argument("--n_inner_trials", default=30, type=int, help="Number of inner trials")
     args = parser.parse_args()
 
     excel_path = os.path.join(os.getcwd(), 'Losses_Read-in_FixedRL.xlsx')

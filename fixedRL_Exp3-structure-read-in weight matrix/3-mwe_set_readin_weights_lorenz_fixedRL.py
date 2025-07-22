@@ -138,7 +138,7 @@ def main():
 
     start_time = time.time()
 
-    for outer in range(n_trials): 
+    for outer in range(100): #n_trials
         print(f"\n--- Outer Trial {outer + 1}/{args.n_trials} ---")
         # Create fresh model for each outer trial
         model = create_base_model(input_shape, output_shape)
@@ -160,14 +160,6 @@ def main():
 
             # New input weights (random normal, no fraction_input)
             new_input_weights = np.random.randn(500, 3)
-            threshold = 1e-3
-            max_attempts = 10
-            attempt = 0
-            while np.any(np.abs(new_input_weights) < threshold) and attempt<max_attempts:
-                mask = np.abs(new_input_weights) < threshold
-                new_input_weights[mask] = np.random.randn(np.sum(mask))
-                attempt +=1
-
             model._set_readin_weights(new_input_weights)
             model.fit(X_train, y_train)
             loss_new = model.evaluate(X_test, y_test, metrics=["mae"])
@@ -228,7 +220,7 @@ def main():
 
             print(f"{method} Model — Median MAE: {median:.6f}, IQR: {iqr:.6f}")
 
-    wb.save(excel_path)
+        wb.save(excel_path)
 
     total_time = time.time() - start_time
     print(f"Completed {n_trials} outer trials with {n_trials} inner trials each in {total_time:.2f} seconds.")

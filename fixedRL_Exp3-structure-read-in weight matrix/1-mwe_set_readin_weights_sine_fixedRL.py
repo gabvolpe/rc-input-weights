@@ -58,7 +58,7 @@ def compute_median_and_iqr(losses):
 def main():
     parser = argparse.ArgumentParser(description="Run RC model with read-in weights variations.")
     parser.add_argument('--task', type=str, default='sine_prediction', help='Task name')
-    parser.add_argument('--n_trials', type=int, default=1000, help='Number of trials')
+    parser.add_argument('--n_trials', type=int, default=100, help='Number of trials')
     args = parser.parse_args()
 
     if args.task == "sine_prediction":

@@ -84,7 +84,7 @@ def sample_fourier_weights(shape, max_freq=10):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_trials', type=int, default=1000, help='Number of trials')
+    parser.add_argument('--n_trials', type=int, default=100, help='Number of trials')
     args = parser.parse_args()
 
     bm.set_dt(0.05)
