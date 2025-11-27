@@ -1,3 +1,8 @@
+'''
+
+NARMA-10
+'''
+
 import os
 import numpy as np
 from pyreco.custom_models import RC
