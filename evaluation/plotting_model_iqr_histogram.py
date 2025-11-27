@@ -1,9 +1,23 @@
+'''
+Systems: 'Sine Wave', 'Mackey-Glass', 'Lorenz', 'NARMA-10'
+Tasks: "Sine-to-Cosine$^2$", 'Mackey-Glass', 'Lorenz', 'NARMA-10'
+Constraint Sets: '1', '2', '3'
+'''
+
+system ="Sine Wave"
+task="Sine-to-Cosine$^2$"
+constraint_set= "1"
+
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import gaussian_kde
 import numpy as np
+
+
+# ------PLOT Standard without colors------------------------------------
+#-----------------------------------------------------------------------
 
 # Set seaborn style
 sns.set(style="whitegrid")
@@ -12,15 +26,49 @@ sns.set(style="whitegrid")
 excel_path = os.path.join(os.getcwd(), 'Losses_Read-in_FixedRL.xlsx')
 
 # Sheet names
-sheet_name_median = 'Exp2_Mackey-Glass_Median'
-sheet_name_iqr = 'Exp2_Mackey-Glass_IQR'
+sheet_name_median = 'Exp'+constraint_set+'_'+ system+'_Median'
+sheet_name_iqr = 'Exp'+constraint_set+'_'+ system+'_IQR'
 
 # Read IQR sheet
 df_iqr = pd.read_excel(excel_path, sheet_name=sheet_name_iqr)
 
+# -----GET sigma from Median sheet----
+df_header = pd.read_excel(
+    excel_path,
+    sheet_name=sheet_name_median,
+    header=None,   # important: prevents pandas from using first row as column names
+    nrows=1        # read only the first row
+)
+sigma_cell= df_header.iloc[0,9]
+sigma=sigma_cell.replace("sigma=", "")
+# After reading sigma as a string (make sure it's stripped/pure numeric string!)
+sigma_str = str(sigma).strip()
+
+# Define expected pattern
+col_pattern = "Gaussian_sd_" + sigma_str
+
+# Check only columns B to F (indices 1 to 5 in Excel, so 0 to 4 in Python)
+columns_b_to_f = df_header.columns[1:6]  # Python slicing is exclusive at the end
+
+# Find the matching column
+gauss_col = None
+for col in columns_b_to_f:
+    if col_pattern in str(col):
+        gauss_col = col
+        break
+
+if gauss_col is not None:
+    # Work with the selected column, e.g.:
+    selected_series = df_header[gauss_col]
+    print(f"Selected column: {gauss_col}")
+else:
+    print("No matching column found among B to F.")
+# ----------------------------------------
+
 # Model names (correspond to columns A-D)
-model_names = ['Model A (Baseline)', 'Model B', 'Model C', 'Model D']
-colors = ['#1C3F60','#A67C52','#3E885B','#B8476D'] # midnight blue, walnut bronze, botanical green, cranberry rose, or ['blue', 'orange', 'red', 'purple']
+model_names = ['Uniform (Baseline)', f'Gaussian sd={sigma}', f"Double Gauss σ={sigma}", "Laplace", "Power Law"]
+#colors = ['#1C3F60','#A67C52','#3E885B','#B8476D'] # midnight blue, walnut bronze, botanical green, cranberry rose, or ['blue', 'orange', 'red', 'purple']
+colors = ['#0000CD', '#D55E00', '#009E73', '#DC143C','#B8476D']
 
 # Plot setup
 plt.figure(figsize=(10, 6))
@@ -74,10 +122,13 @@ ax.xaxis.set_ticks_position('bottom')
 ax.yaxis.set_ticks_position('left')
 
 # Title and axis labels
-plt.title('Exp1 - IQR Frequency for System')
+plt.title("Exp"+constraint_set+"- IQR Frequency for ("+task+") Task", fontsize=12)
+#plt.title('Exp2 - IQR Frequency for Sin-to-Cos2 Task')
 plt.xlabel('Interquartile Range (IQR)')
 plt.ylabel('Frequency')
 
 plt.legend()
 plt.tight_layout()
+plt.grid(False)
 plt.show()
+
