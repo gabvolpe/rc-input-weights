@@ -1,10 +1,10 @@
 # Read-in Weight Matrix Sensitivity Experiments
 
-This repository contains code for a set of three experiments evaluating how changes to the read-in weight matrix of a Reservoir Computing (RC) affect model performance across four distinct systems: Sine Wave, Mackey-Glass, Lorenz, and NARMA-10.
+This repository contains code for a set of experiments evaluating how changes to the read-in weight matrix of a Reservoir Computing (RC) affect model performance across four distinct tasks: **Sine-to-Cosine<sup>2</sup>, Mackey-Glass, Lorenz, and NARMA-10**.
 
 ## Overview
 
-We use a baseline model (**Model A**) and compare it against three modified versions (**Models B, C, and D**) that differ only in the design of the read-in matrix. Each of the three experiments is conducted on the four systems, with the goal of analyzing how architectural changes in the read-in weight matrix influence overall performance and robustness. All experiments are run by keeping the reservoir structure and all hyperparameters than the read-in matrix fixed. Inside the `helper files` folder there are the python files to evaluate and plot the experiments.
+For each task, we compare the performance across modified versions of the model that differ only in the design of the read-in matrix. Considering the results for the four different tasks help analyze how architectural changes in the read-in weight matrix influence overall performance and robustness. All experiments are run by keeping the reservoir structure and all hyperparameters than the read-in matrix fixed. Inside the `evaluation` folder there are the python files to evaluate and plot the experiments.
 
 ### Goals
 
