@@ -53,6 +53,12 @@ sd_list = eval(args.sd_list)
 # --- Functions --------
 # ----------------------
 def create_base_model(input_shape, output_shape):
+    """
+    Create a RC model with specified input and output shapes.
+    
+    input_shape: Shape of the input data
+    output_shape: Shape of the output data
+    """
     model_rc = RC()
     model_rc.add(InputLayer(input_shape=input_shape))
     reservoir_layer = RandomReservoirLayer(
