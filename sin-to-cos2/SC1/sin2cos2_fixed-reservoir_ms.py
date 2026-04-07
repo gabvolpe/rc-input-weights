@@ -20,9 +20,9 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs",
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 parser = argparse.ArgumentParser(description="Run RC model with customizable hyperparameters.")
-parser.add_argument("--n_trials",         type=int,   default=3,    help="Number of outer trials (reservoirs)")
-parser.add_argument("--n_inner",          type=int,   default=10,    help="Number of inner trials per reservoir")
-parser.add_argument("--reservoir_nodes",  type=int,   default=200)
+parser.add_argument("--n_trials",         type=int,   default=5,     help="Number of outer trials (reservoirs)")
+parser.add_argument("--n_inner",          type=int,   default=20,    help="Number of inner trials per reservoir")
+parser.add_argument("--reservoir_nodes",  type=int,   default=50)
 parser.add_argument("--density",          type=float, default=0.15)
 parser.add_argument("--spectral_radius",  type=float, default=0.9)
 parser.add_argument("--leakage_rate",     type=float, default=0.1)
@@ -33,19 +33,54 @@ parser.add_argument("--readin_threshold", type=float, default=1e-3)
 parser.add_argument("--task",             type=str,   default="sin_to_cos2")
 parser.add_argument("--constraint_set",   type=str,   default="1", choices=["1", "2", "3"],
                     help="Unused; kept for compatibility")
+parser.add_argument("--parallel",         action="store_true", default=True,
+                    help="Run inner trials in parallel using all available CPU cores. "
+                         "Default: sequential (cleaner profiling, easier to debug).")
 
 args = parser.parse_args()
 
 GAUSS_SD  = 1.0
 THRESHOLD = args.readin_threshold if args.set_threshold else None
 
+# ------------------------------------------------------------------ #
+# Profiling: wall-time per stage, accumulated across all inner trials  #
+#   sample      — weight sampling for all 5 distributions             #
+#   deserialize — pickle.loads per distribution call                  #
+#   set_weights — _set_readin_weights per distribution call           #
+#   fit         — model.fit per distribution call                     #
+#   predict     — predict_sequences per distribution call             #
+# ------------------------------------------------------------------ #
+_timing      = {"sample": 0.0, "deserialize": 0.0, "set_weights": 0.0,
+                "fit": 0.0, "predict": 0.0}
+_timing_lock = threading.Lock()
+
 
 def _fit_and_predict(model_serialized, weights, X_train, y_train, X_test, y_test):
-    """Inject read-in weights into a fresh model copy, fit, and return predictions."""
+    """
+    Inject read-in weights into a fresh model copy, fit, and return predictions.
+
+    Returns:
+        (gt_seq, pred_seq, local_timing) where local_timing is a dict with keys
+        "deserialize", "set_weights", "fit", "predict" and the wall-time in seconds
+        for each stage of this single call.
+    """
+    t0 = time.perf_counter()
     model = pickle.loads(model_serialized)
+    t1 = time.perf_counter()
     model._set_readin_weights(weights)
+    t2 = time.perf_counter()
     model.fit(X_train, y_train)
-    return predict_sequences(model, X_test, y_test)
+    t3 = time.perf_counter()
+    gt_seq, pred_seq = predict_sequences(model, X_test, y_test)
+    t4 = time.perf_counter()
+
+    local_timing = {
+        "deserialize": t1 - t0,
+        "set_weights": t2 - t1,
+        "fit":         t3 - t2,
+        "predict":     t4 - t3,
+    }
+    return gt_seq, pred_seq, local_timing
 
 
 def run_inner_trial(model_serialized, X_train, y_train, X_test, y_test,
@@ -55,11 +90,13 @@ def run_inner_trial(model_serialized, X_train, y_train, X_test, y_test,
 
     Samples read-in weights, fits a fresh model copy per distribution, and
     records the full time series into pred_records (thread-safe).
+    Stage timings are accumulated into the global _timing dict.
     """
     outer_idx = trial_outer + 1  # 1-based for storage
     inner_idx = trial_inner + 1
     readin_shape = (args.reservoir_nodes, 1)
 
+    t_sample_start = time.perf_counter()
     weights = {
         "uniform":         sample_readin_weights(readin_shape, "random_uniform",  threshold=THRESHOLD),
         "gaussian":        sample_readin_weights(readin_shape, "random_normal",   sd=GAUSS_SD, threshold=THRESHOLD),
@@ -67,17 +104,27 @@ def run_inner_trial(model_serialized, X_train, y_train, X_test, y_test,
         "laplace":         sample_readin_weights(readin_shape, "laplace",         threshold=THRESHOLD),
         "power_law":       sample_readin_weights(readin_shape, "power_law",       threshold=THRESHOLD),
     }
+    t_sample = time.perf_counter() - t_sample_start
 
     # Assert that all weights meet the threshold requirement before fitting any models.
     for dist, w in weights.items():
         assert_weights_above_threshold(w, THRESHOLD, dist)
 
     # Fit and predict for each distribution; gt_seq is the same for all, so we can reuse it.
-    gt_seq, pred_uniform  = _fit_and_predict(model_serialized, weights["uniform"],         X_train, y_train, X_test, y_test)
-    _,      pred_gauss    = _fit_and_predict(model_serialized, weights["gaussian"],        X_train, y_train, X_test, y_test)
-    _,      pred_dbgauss  = _fit_and_predict(model_serialized, weights["double_gaussian"], X_train, y_train, X_test, y_test)
-    _,      pred_laplace  = _fit_and_predict(model_serialized, weights["laplace"],         X_train, y_train, X_test, y_test)
-    _,      pred_powlaw   = _fit_and_predict(model_serialized, weights["power_law"],       X_train, y_train, X_test, y_test)
+    gt_seq, pred_uniform,  t_u  = _fit_and_predict(model_serialized, weights["uniform"],         X_train, y_train, X_test, y_test)
+    _,      pred_gauss,    t_g  = _fit_and_predict(model_serialized, weights["gaussian"],        X_train, y_train, X_test, y_test)
+    _,      pred_dbgauss,  t_dg = _fit_and_predict(model_serialized, weights["double_gaussian"], X_train, y_train, X_test, y_test)
+    _,      pred_laplace,  t_l  = _fit_and_predict(model_serialized, weights["laplace"],         X_train, y_train, X_test, y_test)
+    _,      pred_powlaw,   t_p  = _fit_and_predict(model_serialized, weights["power_law"],       X_train, y_train, X_test, y_test)
+
+    # Accumulate timing from all five distribution calls into the global counters.
+    with _timing_lock:
+        _timing["sample"] += t_sample
+        for t in (t_u, t_g, t_dg, t_l, t_p):
+            _timing["deserialize"] += t["deserialize"]
+            _timing["set_weights"] += t["set_weights"]
+            _timing["fit"]         += t["fit"]
+            _timing["predict"]     += t["predict"]
 
     with record_lock:
         for dist, w in weights.items():
@@ -89,6 +136,18 @@ def run_inner_trial(model_serialized, X_train, y_train, X_test, y_test,
         pred_records["double_gaussian"].append((outer_idx, inner_idx, pred_dbgauss.copy()))
         pred_records["laplace"].append((outer_idx, inner_idx, pred_laplace.copy()))
         pred_records["power_law"].append((outer_idx, inner_idx, pred_powlaw.copy()))
+
+
+def _print_timing(label):
+    """Print a breakdown of accumulated stage times with percentage of total."""
+    total = sum(_timing.values())
+    if total == 0:
+        return
+    print(f"  [profiling] {label}")
+    for stage, secs in _timing.items():
+        pct = 100.0 * secs / total
+        print(f"    {stage:<12s}: {secs:7.2f}s  ({pct:5.1f}%)")
+    print(f"    {'TOTAL':<12s}: {total:7.2f}s")
 
 
 def _save_records(records, path_template):
@@ -166,6 +225,7 @@ def main():
         f"  Read-ins   : {len(dist_keys)} distributions | SD {GAUSS_SD} (Gaussian) | "
         f"threshold {'off' if THRESHOLD is None else THRESHOLD}\n"
         f"  Trials     : {args.n_trials} reservoirs × {args.n_inner} read-in samples each\n"
+        f"  Execution  : {'parallel (' + str(os.cpu_count()) + ' workers)' if args.parallel else 'sequential'}\n"
         f"{'='*60}\n"
     )
 
@@ -189,24 +249,35 @@ def main():
               f"read-in weights resampled per trial per distribution")
 
         completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = [
-                executor.submit(run_inner_trial, model_serialized,
-                                X_train, y_train, X_test, y_test,
+
+        if args.parallel:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+                futures = [
+                    executor.submit(run_inner_trial, model_serialized,
+                                    X_train, y_train, X_test, y_test,
+                                    trial_outer, inner_idx,
+                                    readin_records, pred_records, record_lock)
+                    for inner_idx in range(args.n_inner)
+                ]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    completed += 1
+                    print(f"  [{completed}/{args.n_inner}] inner trials complete")
+        else:
+            for inner_idx in range(args.n_inner):
+                run_inner_trial(model_serialized, X_train, y_train, X_test, y_test,
                                 trial_outer, inner_idx,
                                 readin_records, pred_records, record_lock)
-                for inner_idx in range(args.n_inner)
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
                 completed += 1
                 print(f"  [{completed}/{args.n_inner}] inner trials complete")
 
         print(f"  Outer trial {trial_outer + 1}/{args.n_trials} done")
         save_checkpoint(OUTPUT_DIR, readin_records, pred_records, reservoir_records, y_test)
+        _print_timing(f"cumulative after reservoir {trial_outer + 1}")
         print()
 
-    print(f"Total time: {time.time() - start_time:.2f} sec")
+    print(f"\nTotal wall time: {time.time() - start_time:.2f} sec")
+    _print_timing("final breakdown (all reservoirs)")
 
 
 if __name__ == "__main__":
