@@ -5,9 +5,11 @@ For each fixed reservoir, many inner trials are run, each with different read-in
 
 Set Contraint 1: input without masking 100%, no zero or near-zero read-in values.
 
+Gaussian and Double-Gaussian read-in weights use a fixed SD of 1.0 (unit value); no SD optimisation is performed.
+
 1)The reservoir weights are saved in the corresponding .npy, in the form: outer_ID (reservoir_ID), reservoir_weights
 2)The readin weights are saved in the corresponding .npy, in the form: outer_ID (reservoir_ID), inner_ID (read-in_ID), readin_weights
-3)The results (predictions and ground truths) are saved in the corresponding .npy, in the form: 
+3)The results (predictions and ground truths) are saved in the corresponding .npy, in the form:
 outer_ID (reservoir_ID), gt-uniform, pred-uniform, gt-gauss, pred-gauss, gt-dbgauss, pred-dbgauss, gt-laplace, pred-laplace, gt-powerlaw, pred-powerlaw
 
 """
@@ -52,12 +54,6 @@ parser.add_argument("--ridge_alpha", type=float, default=0.1)
 parser.add_argument("--set_threshold", type=bool, default=True, help="Set to False if no threshold wished")
 parser.add_argument("--readin_threshold", type=float, default=1e-3)
 
-parser.add_argument(
-    "--sd_list",
-    type=str,
-    default="[0.1, 0.25, 0.5, 0.75, 1.0]",
-    help="List of Gaussian SD values, format: [0.1,0.25,...]"
-)
 parser.add_argument("--task", type=str, default="sin_to_cos2")
 
 parser.add_argument(
@@ -69,7 +65,9 @@ parser.add_argument(
 
 # Parse
 args = parser.parse_args()
-sd_list = eval(args.sd_list)
+
+# Fixed SD used for all Gaussian-based distributions (no optimisation)
+GAUSS_SD = 1.0
 
 
 # ----------------------
@@ -94,27 +92,55 @@ def create_base_model(input_shape, output_shape):
 
 
 def create_weights(shape, method, dynamic_sd=None):
+    """
+    Sample a read-in weight matrix from the specified distribution.
+
+    Args:
+        shape: Tuple defining the weight matrix shape, e.g. (reservoir_nodes, 1).
+        method: One of 'random_uniform', 'random_normal', 'double_gaussian',
+                'laplace', 'power_law'.
+        dynamic_sd: Standard deviation for Gaussian-based methods. Defaults to 1.0
+                    if not provided.
+
+    Returns:
+        np.ndarray of the requested shape.
+
+    Notes:
+        When args.set_threshold is True (Constraint Set 1), weights whose absolute
+        value falls below args.readin_threshold are resampled until the constraint
+        is satisfied. This prevents near-zero weights that would effectively silence
+        an input connection.
+    """
     if args.set_threshold is True:
         threshold = args.readin_threshold
+
+        # --- QUESTION: This can also draw values close to zero! Why no resampling?
         if method == "random_uniform":
             return np.random.uniform(-1, 1, size=shape)
+
+        # --- Gaussian: zero-mean, symmetric; resample any near-zero entries ---
         if method == "random_normal":
             mu = 0.0
             sd = dynamic_sd if dynamic_sd is not None else 1.0
             w = np.random.normal(mu, sd, size=shape)
+            # Iteratively replace values too close to zero
             while np.any(np.abs(w) < threshold):
                 idx = np.abs(w) < threshold
                 w[idx] = np.random.normal(mu, sd, size=np.sum(idx))
             return w
+
+        # --- Double Gaussian: bimodal at ±1.5, each component with equal weight ---
         if method == "double_gaussian":
-            mu1, mu2 = -1.5, 1.5
+            mu1, mu2 = -1.5, 1.5          # means of the two components
             sigma1, sigma2 = dynamic_sd, dynamic_sd
-            amp1, amp2 = 0.5, 0.5
+            amp1, amp2 = 0.5, 0.5         # mixing proportions (equal)
             n_elements = np.prod(shape)
+            # Assign each element to one of the two Gaussian components
             choices = np.random.choice([0, 1], size=n_elements, p=[amp1, amp2])
             g1 = np.random.normal(mu1, sigma1, size=n_elements)
             g2 = np.random.normal(mu2, sigma2, size=n_elements)
             w = np.where(choices == 0, g1, g2)
+            # Resample near-zero entries, preserving the bimodal mixture
             while np.any(np.abs(w) < threshold):
                 idx = np.abs(w) < threshold
                 n_idx = np.sum(idx)
@@ -122,18 +148,25 @@ def create_weights(shape, method, dynamic_sd=None):
                 g2_new = np.random.normal(mu2, sigma2, size=n_idx)
                 w[idx] = np.where(np.random.rand(n_idx) < amp1, g1_new, g2_new)
             return w.reshape(shape)
+
+        # --- Laplace: heavier tails than Gaussian, concentrated around zero ---
         if method == "laplace":
             w = np.random.laplace(loc=0.0, scale=0.5, size=shape).flatten()
             while np.any(np.abs(w) < threshold):
                 idx = np.abs(w) < threshold
                 w[idx] = np.random.laplace(loc=0.0, scale=0.5, size=np.sum(idx))
             return w.reshape(shape)
+
+        # --- Power-law: symmetric distribution with exponent a=2; values in (0, 1] ---
         if method == "power_law":
             a = 2.0
+            # Draw positive samples, mirror them to create a symmetric distribution
             positive = np.random.power(a, size=np.prod(shape))
             negative = -positive.copy()
             combined = np.concatenate([positive, negative])
+            # Sample without replacement to avoid duplicate values
             w = np.random.choice(combined, size=np.prod(shape), replace=False)
+            # Resample near-zero entries while maintaining ±symmetry
             while np.any(np.abs(w) < threshold):
                 idx = np.abs(w) < threshold
                 n_new = np.sum(idx)
@@ -143,15 +176,21 @@ def create_weights(shape, method, dynamic_sd=None):
                 np.random.shuffle(new_vals)
                 w[idx] = new_vals[:n_new]
             return w.reshape(shape)
+
         raise ValueError(f"Unknown weight initialization method: {method}")
+
     else:
+        # No threshold enforced — weights are drawn directly from each distribution
+
         if method == "random_uniform":
             return np.random.uniform(-1, 1, size=shape)
+
         if method == "random_normal":
             mu = 0.0
             sd = dynamic_sd if dynamic_sd is not None else 1.0
             w = np.random.normal(mu, sd, size=shape)
             return w
+
         if method == "double_gaussian":
             mu1, mu2 = -1.5, 1.5
             sigma1, sigma2 = dynamic_sd, dynamic_sd
@@ -162,9 +201,11 @@ def create_weights(shape, method, dynamic_sd=None):
             g2 = np.random.normal(mu2, sigma2, size=n_elements)
             w = np.where(choices == 0, g1, g2)
             return w.reshape(shape)
+
         if method == "laplace":
             w = np.random.laplace(loc=0.0, scale=0.5, size=shape).flatten()
             return w.reshape(shape)
+
         if method == "power_law":
             a = 2.0
             positive = np.random.power(a, size=np.prod(shape))
@@ -172,6 +213,7 @@ def create_weights(shape, method, dynamic_sd=None):
             combined = np.concatenate([positive, negative])
             w = np.random.choice(combined, size=np.prod(shape), replace=False)
             return w.reshape(shape)
+
         raise ValueError(f"Unknown weight initialization method: {method}")
 
 
@@ -187,12 +229,10 @@ def scalar_from_model(fitted_model, X_test, y_test, washout=200):
 
 def run_inner_trial(
     model_serialized,
-    sd_list,
     X_train,
     y_train,
     X_test,
     y_test,
-    best_sd,
     trial_outer,
     trial_inner,
     readin_records,
@@ -200,9 +240,10 @@ def run_inner_trial(
 ):
     """
     Run one inner trial for all distributions and return scalars:
-    gt/pred for Uniform, Gaussian(best_sd), Double-Gaussian(best_sd),
+    gt/pred for Uniform, Gaussian(sd=1.0), Double-Gaussian(sd=1.0),
     Laplace, Power-law.
 
+    Gaussian SD is fixed at GAUSS_SD (unit value); no optimisation is performed.
     Additionally: record (outer, inner, weights) for each distribution.
     """
     washout = 200
@@ -218,16 +259,16 @@ def run_inner_trial(
     model_rc_uniform.fit(X_train, y_train)
     gt_uniform, pred_uniform = scalar_from_model(model_rc_uniform, X_test, y_test, washout)
 
-    # ---- Gaussian with best_sd ----
+    # ---- Gaussian with fixed unit SD ----
     model_rc_gauss = pickle.loads(model_serialized)
-    weights_gauss = create_weights((args.reservoir_nodes, 1), "random_normal", dynamic_sd=best_sd)
+    weights_gauss = create_weights((args.reservoir_nodes, 1), "random_normal", dynamic_sd=GAUSS_SD)
     model_rc_gauss._set_readin_weights(weights_gauss)
     model_rc_gauss.fit(X_train, y_train)
     gt_gauss, pred_gauss = scalar_from_model(model_rc_gauss, X_test, y_test, washout)
 
-    # ---- Double-Gaussian with best_sd ----
+    # ---- Double-Gaussian with fixed unit SD ----
     model_rc_dbgauss = pickle.loads(model_serialized)
-    weights_dbgauss = create_weights((args.reservoir_nodes, 1), "double_gaussian", dynamic_sd=best_sd)
+    weights_dbgauss = create_weights((args.reservoir_nodes, 1), "double_gaussian", dynamic_sd=GAUSS_SD)
     model_rc_dbgauss._set_readin_weights(weights_dbgauss)
     model_rc_dbgauss.fit(X_train, y_train)
     gt_dbgauss, pred_dbgauss = scalar_from_model(model_rc_dbgauss, X_test, y_test, washout)
@@ -335,41 +376,13 @@ def main():
         )
         print(f"Recorded reservoir weights for outer trial {trial_outer + 1}")
 
-        # -------------------------------------------------
-        # 1) Find best_sd for this outer trial
-        # -------------------------------------------------
-        gauss_losses_per_sd = {sd: [] for sd in sd_list}
-
-        for sd in sd_list:
-            for _ in range(args.n_inner):
-                model_rc_g = pickle.loads(model_serialized)
-                weights_gauss = create_weights((args.reservoir_nodes, 1), "random_normal", dynamic_sd=sd)
-                model_rc_g._set_readin_weights(weights_gauss)
-                model_rc_g.fit(X_train, y_train)
-
-                y_pred = model_rc_g.predict(X_test)
-                washout = 200
-                y_true_seq = y_test[0, washout:, 0]
-                y_pred_seq = y_pred[0, washout:, 0]
-                mae = float(np.mean(np.abs(y_true_seq - y_pred_seq)))
-                gauss_losses_per_sd[sd].append(mae)
-
-        avg_gauss_losses = {sd: np.mean(gauss_losses_per_sd[sd]) for sd in sd_list}
-        best_sd = min(avg_gauss_losses, key=avg_gauss_losses.get)
-        best_sd_numeric = float(best_sd)
-        print(f"Best Gaussian SD for outer trial {trial_outer + 1}: {best_sd_numeric}")
-
-        # -------------------------------------------------
-        # 2) Now run your actual inner trials using this best_sd
-        # -------------------------------------------------
+        # Run inner trials — Gaussian SD is fixed at GAUSS_SD (unit value)
         with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
             futures = [
                 executor.submit(
                     run_inner_trial,
                     model_serialized,
-                    sd_list,
                     X_train, y_train, X_test, y_test,
-                    best_sd_numeric,
                     trial_outer,
                     inner_idx,
                     readin_records,
