@@ -20,8 +20,8 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs",
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 parser = argparse.ArgumentParser(description="Run RC model with customizable hyperparameters.")
-parser.add_argument("--n_trials",         type=int,   default=5,     help="Number of outer trials (reservoirs)")
-parser.add_argument("--n_inner",          type=int,   default=20,    help="Number of inner trials per reservoir")
+parser.add_argument("--n_trials",         type=int,   default=50,     help="Number of outer trials (reservoirs)")
+parser.add_argument("--n_inner",          type=int,   default=100,    help="Number of inner trials per reservoir")
 parser.add_argument("--reservoir_nodes",  type=int,   default=50)
 parser.add_argument("--density",          type=float, default=0.15)
 parser.add_argument("--spectral_radius",  type=float, default=0.9)
