@@ -1,5 +1,5 @@
 """
-Evaluation: SC1 Fixed-Reservoir experiment — sin-to-cos2.
+Evaluation: Fixed-Reservoir experiment for specified SC — sin-to-cos2.
 
 Loads results from sin-to-cos2/outputs/, computes R² scores per
 (reservoir, read-in sample, distribution), and produces a grouped violin
@@ -18,6 +18,7 @@ from utils.helpers import r2_score
 # ------------------------------------------------------------------ #
 # Settings
 # ------------------------------------------------------------------ #
+SET_CONSTRAINT = "1"
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "outputs", "fixed-reservoir")
 WASHOUT     = 0  # transient timesteps excluded from scoring
 
@@ -41,13 +42,13 @@ DIST_COLORS = {
 # ------------------------------------------------------------------ #
 # Load data
 # ------------------------------------------------------------------ #
-gt_path = os.path.join(RESULTS_DIR, "sc1_ground_truth.npy")
+gt_path = os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_ground_truth.npy")
 gt = np.load(gt_path)          # shape: (n_time, n_states)
 gt_seq = gt[:, 0]              # channel 0, full length — washout applied in r2_score
 
 preds = {}
 for dist in DISTRIBUTIONS:
-    path = os.path.join(RESULTS_DIR, f"sc1_timeseries_{dist}.npy")
+    path = os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+f"_timeseries_{dist}.npy")
     preds[dist] = np.load(path)  # shape: (n_rows, 2 + n_time); cols: outer, inner, t0...
 
 print(f"Ground truth shape : {gt.shape}")
@@ -103,7 +104,7 @@ ax.set_xticks(group_centers)
 ax.set_xticklabels([f"Reservoir {oid}" for oid in outer_ids])
 
 ax.set_ylabel("R²")
-ax.set_title("SC1 Fixed-Reservoir — R² per reservoir and read-in distribution\n"
+ax.set_title(f"SC{SET_CONSTRAINT} Fixed-Reservoir — R² per reservoir and read-in distribution\n"
              f"(washout = {WASHOUT} timesteps, inner trials shown as violins)")
 ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.4)
 all_r2 = np.concatenate([
@@ -119,9 +120,10 @@ legend_patches = [
 ax.legend(handles=legend_patches, loc="lower right", framealpha=0.9)
 
 plt.tight_layout()
-plt.savefig(os.path.join(RESULTS_DIR, "sc1_r2_violin.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_violin.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_violin.pdf"))
 plt.show()
-print(f"Saved plot → {os.path.join(RESULTS_DIR, 'sc1_r2_violin.png')}")
+print(f"Saved plot → {os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_violin.png")}")
 
 # ------------------------------------------------------------------ #
 # Best-prediction plot: ground truth + best prediction per distribution
@@ -174,14 +176,15 @@ for dist in DISTRIBUTIONS:
 
 ax.set_xlabel("Timestep")
 ax.set_ylabel("Output")
-ax.set_title("SC1 Fixed-Reservoir — Ground truth vs. predictions per distribution\n"
+ax.set_title(f"SC{SET_CONSTRAINT} Fixed-Reservoir — Ground truth vs. predictions per distribution\n"
              "solid: best | dashed: median | shaded: full range")
 ax.legend(loc="upper right", framealpha=0.9, fontsize=8)
 
 plt.tight_layout()
-plt.savefig(os.path.join(RESULTS_DIR, "sc1_best_predictions.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_best_predictions.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_best_predictions.pdf"))
 plt.show()
-print(f"Saved plot → {os.path.join(RESULTS_DIR, 'sc1_best_predictions.png')}")
+print(f"Saved plot → {os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_best_predictions.png")}")
 
 # ------------------------------------------------------------------ #
 # Variance decomposition: reservoir vs. read-in contribution
@@ -229,14 +232,31 @@ ax.set_xticklabels([DIST_LABELS[d] for d in DISTRIBUTIONS])
 ax.set_ylabel("Variance explained (%)")
 ax.set_ylim(0, 100)
 ax.axhline(50, color="black", linewidth=0.8, linestyle="--", alpha=0.4)
-ax.set_title("SC1 Fixed-Reservoir — Variance decomposition: reservoir vs. read-in weights\n"
+ax.set_title(f"SC{SET_CONSTRAINT} Fixed-Reservoir — Variance decomposition: reservoir vs. read-in weights\n"
              "solid fill = reservoir effect | hatched = read-in effect")
-ax.legend(framealpha=0.9)
+
+legend_handles = [
+    mpatches.Patch(
+        facecolor="dimgray",   
+        alpha=0.9,
+        label="Read-in effect (between)"
+    ),
+    mpatches.Patch(
+        facecolor="0.6",   # lighter for contrast
+        hatch="///",
+        edgecolor="white",
+        alpha=0.7,
+        label="Reservoir effect (within)"
+    ),
+]
+#ax.legend(framealpha=0.9)
+ax.legend(handles=legend_handles, framealpha=0.9)
 
 plt.tight_layout()
-plt.savefig(os.path.join(RESULTS_DIR, "sc1_variance_decomposition.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_variance_decomposition.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_variance_decomposition.pdf"))
 plt.show()
-print(f"Saved plot → {os.path.join(RESULTS_DIR, 'sc1_variance_decomposition.png')}")
+print(f"Saved plot → {os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_variance_decomposition.png")}")
 
 # --- Plot 2: R² heatmap (outer × inner) per distribution ---
 n_inner_max = max(len(r2_data[DISTRIBUTIONS[0]][oid]) for oid in outer_ids)
@@ -262,21 +282,23 @@ for ax, dist in zip(axes, DISTRIBUTIONS):
     im = ax.imshow(matrix, aspect="auto", vmin=vmin, vmax=vmax,
                    cmap="RdYlGn", interpolation="nearest")
     ax.set_title(DIST_LABELS[dist], fontsize=9, color=DIST_COLORS[dist], fontweight="bold")
-    ax.set_xlabel("Read-in sample", fontsize=8)
+    ax.set_xlabel("Read-in samples", fontsize=8)
     ax.set_xticks(range(n_inner_max))
-    ax.set_xticklabels(range(1, n_inner_max + 1), fontsize=7)
+    #ax.set_xticklabels(range(1, n_inner_max + 1), fontsize=7)
+    ax.set_xticklabels([])
 
-axes[0].set_ylabel("Reservoir")
+axes[0].set_ylabel("Reservoirs")
 axes[0].set_yticks(range(len(outer_ids)))
 axes[0].set_yticklabels([f"R{oid}" for oid in outer_ids], fontsize=8)
 
 assert im is not None, "No heatmap was created — DISTRIBUTIONS must not be empty"
 fig.colorbar(im, ax=axes[-1], label="R²", shrink=0.8)
-fig.suptitle("SC1 — R² heatmap: each row = one reservoir, each column = one read-in sample\n"
+fig.suptitle(f"SC{SET_CONSTRAINT} — R² heatmap: each row = one reservoir, each column = one read-in sample\n"
              "Row-to-row variation → reservoir effect  |  Column-to-column variation → read-in effect",
              fontsize=9)
 
 plt.tight_layout()
-plt.savefig(os.path.join(RESULTS_DIR, "sc1_r2_heatmap.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_heatmap.png"), dpi=150)
+plt.savefig(os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_heatmap.pdf"))
 plt.show()
-print(f"Saved plot → {os.path.join(RESULTS_DIR, 'sc1_r2_heatmap.png')}")
+print(f"Saved plot → {os.path.join(RESULTS_DIR, "sc"+SET_CONSTRAINT+"_r2_heatmap.png")}")
