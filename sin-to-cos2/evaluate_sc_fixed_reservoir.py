@@ -4,6 +4,8 @@ Evaluation: Fixed-Reservoir experiment for specified SC — sin-to-cos2.
 Loads results from sin-to-cos2/outputs/, computes R² scores per
 (reservoir, read-in sample, distribution), and produces a grouped violin
 plot showing per-reservoir score distributions coloured by distribution.
+
+Please specify which set constraint (SC1, SC2, or SC3) you want to evaluate by inizializing the following variable SET_CONSTRAINT (e.g. "1" for SC1).
 """
 
 import os

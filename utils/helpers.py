@@ -218,7 +218,7 @@ def sample_readin_weights(shape, method, sd=1.0, threshold=None):
     sampler = _samplers[method]
     w = sampler(shape).flatten()
 
-    if threshold is not None:
+    if threshold is not None and threshold is not False:
         while np.any(np.abs(w) < threshold):
             idx = np.abs(w) < threshold
             w[idx] = sampler((int(np.sum(idx)),)).flatten()

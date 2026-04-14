@@ -9,6 +9,8 @@ Computes:
 - Violin plot grouped by read-in (outer)
 - Best prediction plots
 - Variance decomposition (read-in vs reservoir)
+
+Please specify which set constraint (SC1, SC2, or SC3) you want to evaluate by inizializing the following variable SET_CONSTRAINT (e.g. "1" for SC1).
 """
 
 import os
