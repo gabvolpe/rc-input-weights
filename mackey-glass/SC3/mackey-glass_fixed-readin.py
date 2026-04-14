@@ -43,11 +43,11 @@ parser.add_argument("--reservoir_nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.2)
 parser.add_argument("--spectral_radius", type=float, default=0.8)
 parser.add_argument("--leakage_rate", type=float, default=0.5)
-parser.add_argument("--fraction_input", type=float, default=0.5)
+parser.add_argument("--fraction_input", type=float, default=1.0)
 
 parser.add_argument("--ridge_alpha", type=float, default=0.1)
 
-parser.add_argument("--set_threshold", type=bool, default=True)
+parser.add_argument("--set_threshold", type=bool, default=False)
 parser.add_argument("--readin_threshold", type=float, default=1e-3)
 
 parser.add_argument("--parallel", action="store_true", default=True)
