@@ -1,98 +1,137 @@
 """
-Lorenz
-Unconditional Variability Extraction with fixed read-in.
-For each of the five fixed read-in matrices, many inner trials are run, each with different reservoir matrices are generated.
+Lorenz RC - Fixed Read-in / Variable Reservoir (TRUE AUTOREGRESSIVE)
 
-Set Contraint 1: input without masking 100%, no zero or near-zero read-in values.
+Structure:
+- OUTER trials = fixed READ-IN matrices (5 distributions)
+- INNER trials = different RANDOM reservoirs
 
-1)The readin weights are saved in the corresponding .npy, in the form: outer_ID (readin_ID), readin_weights
-2)The reservoir weights are saved in the corresponding .npy, in the form: outer_ID (readin_ID), inner_ID (reservoir_ID), reservoir_weights
-3)The results (predictions and ground truths) are saved in the corresponding .npy, in the form: 
-outer_trial (readin_ID), gt-uniform, pred-uniform, gt-gauss, pred-gauss, gt-dbgauss, pred-dbgauss, gt-laplace, pred-laplace, gt-powerlaw, pred-powerlaw
+Evaluation:
+- One-step prediction (teacher forced)
+- Autoregressive rollout prediction (closed loop)
+
+Outputs (UNCHANGED FORMAT):
+1) sc1_readin_weights_{dist}.npy
+2) sc1_reservoir_weights.npy
+3) sc1_results_fixed-readin.npy
 """
-
 
 import os
 import numpy as np
-from pyreco.custom_models import RC
-from pyreco.layers import InputLayer, ReadoutLayer, RandomReservoirLayer
-from pyreco.utils_data import sequence_to_sequence
-from pyreco.optimizers import RidgeSK
 import time
 import argparse
+import pickle
+import threading
+import concurrent.futures
+
+from scipy.integrate import solve_ivp
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from scipy.integrate import solve_ivp
-import brainpy as bp
-import brainpy.math as bm
-import concurrent.futures
-import pickle
-import matplotlib.pyplot as plt
-import threading
+
+from pyreco.custom_models import RC
+from pyreco.layers import InputLayer, ReadoutLayer, RandomReservoirLayer
+from pyreco.optimizers import RidgeSK
 
 
 # ----------------------
-# Output directories
+# OUTPUT
 # ----------------------
 OUTPUT_DIR = "lorenz/outputs/fixed-readin"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # ----------------------
-# --- User Arguments ---
+# ARGUMENTS
 # ----------------------
-parser = argparse.ArgumentParser(description="Run RC model with customizable hyperparameters.")
+parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,
-                    help="Number of outer trials, each trial has a different fixed reservoir")
-parser.add_argument("--n_inner", type=int, default=3,
-                    help="Number of inner trials, each inner trial with different read-ins from the 5 distributions")
+parser.add_argument("--n_trials", type=int, default=2)
+parser.add_argument("--n_inner", type=int, default=3)
 
 parser.add_argument("--reservoir_nodes", type=int, default=300)
 parser.add_argument("--density", type=float, default=0.1)
 parser.add_argument("--spectral_radius", type=float, default=0.9)
 parser.add_argument("--leakage_rate", type=float, default=0.5)
-parser.add_argument("--fraction_input", type=float, default=1.0,
-                    help="Percentage of input without masking")
-
+parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-3)
 
-parser.add_argument("--set_threshold", type=bool, default=True,
-                    help="Set to False if no threshold wished")
-parser.add_argument("--readin_threshold", type=float, default=1e-3)
+parser.add_argument("--rollout_steps", type=int, default=5)
 
-parser.add_argument(
-    "--sd_list",
-    type=str,
-    default="[0.1, 0.25, 0.5, 0.75, 1.0]",
-    help="List of Gaussian SD values, format: [0.1,0.25,...]"
-)
-parser.add_argument(
-    "--task",
-    type=str,
-    default="sequence_to_sequence_autoregressive",
-    choices=["sequence_to_sequence_autoregressive", "sequence_to_sequence_non_autoregressive"]
-)
-
-parser.add_argument(
-    "--constraint_set",
-    type=str, default="1",
-    choices=["1", "2", "3"],
-    help="(Unused now; only kept for compatibility)"
-)
-
-# Parse
 args = parser.parse_args()
-sd_list = eval(args.sd_list)
 
 
 # ----------------------
-# --- Functions --------
+# LORENZ SYSTEM
 # ----------------------
-def create_base_model(input_shape, output_shape):
-    model_rc = RC()
-    model_rc.add(InputLayer(input_shape=input_shape))
-    reservoir_layer = RandomReservoirLayer(
+sigma, beta, rho = 10, 8/3, 28
+
+
+def lorenz(t, s):
+    x, y, z = s
+    return [
+        sigma * (y - x),
+        x * (rho - z) - y,
+        x * y - beta * z
+    ]
+
+
+def generate_lorenz(n_traj=5, n_steps=2000, dt=0.01):
+    t = np.linspace(0, dt * (n_steps - 1), n_steps)
+    data = []
+
+    initials = np.random.uniform(-10, 10, (n_traj, 3))
+
+    for x0 in initials:
+        sol = solve_ivp(lorenz, [t[0], t[-1]], x0, t_eval=t)
+        data.append(sol.y.T)
+
+    return np.array(data)
+
+
+# ----------------------
+# AUTOREGRESSIVE DATA (ONE-STEP TRAINING)
+# ----------------------
+def lorenz_autoreg(n_traj=6, n_steps=2000, dt=0.01):
+    data = generate_lorenz(n_traj, n_steps, dt)
+
+    train, test = train_test_split(data, test_size=0.3, random_state=42)
+
+    X_train, y_train = [], []
+    X_test, y_test = [], []
+
+    for traj in train:
+        for t in range(len(traj) - 1):
+            X_train.append(traj[t])
+            y_train.append(traj[t + 1])
+
+    for traj in test:
+        for t in range(len(traj) - 1):
+            X_test.append(traj[t])
+            y_test.append(traj[t + 1])
+
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+
+    scaler = StandardScaler().fit(X_train)
+
+    X_train = scaler.transform(X_train)[:, None, :]
+    y_train = scaler.transform(y_train)[:, None, :]
+    X_test = scaler.transform(X_test)[:, None, :]
+    y_test = scaler.transform(y_test)[:, None, :]
+
+    return X_train, X_test, y_train, y_test, scaler
+
+
+# ----------------------
+# MODEL
+# ----------------------
+def create_model():
+    model = RC()
+
+    model.add(InputLayer(input_shape=(1, 3)))
+
+    reservoir = RandomReservoirLayer(
         nodes=args.reservoir_nodes,
         density=args.density,
         activation="tanh",
@@ -100,416 +139,228 @@ def create_base_model(input_shape, output_shape):
         leakage_rate=args.leakage_rate,
         fraction_input=args.fraction_input
     )
-    model_rc.add(reservoir_layer)
-    model_rc.add(ReadoutLayer(output_shape, fraction_out=1.0))
-    optim = RidgeSK(alpha=args.ridge_alpha)
-    model_rc.compile(optimizer=optim, metrics=["mean_squared_error"])
-    return model_rc, reservoir_layer
 
-sigma, beta, rho = 10, 8/3, 28
+    model.add(reservoir)
 
-def lorenz(t, state):
-    x, y, z = state
-    dx = sigma * (y - x)
-    dy = x * (rho - z) - y
-    dz = x * y - beta * z
-    return [dx, dy, dz]
+    model.add(ReadoutLayer(output_shape=(1, 3), fraction_out=1.0))
 
-def generate_lorenz_data(n_trajectories=3, n_steps=2000, dt=0.01): #trajectories are number of independent Lorenz system trajectories (simulations with different initial conditions). Each being one complete dynamical evolution of the L. system starting from a distinct random initial state.
-    t_eval = np.linspace(0, dt * (n_steps - 1), n_steps)
-    all_trajs = []
-    rng = np.random.default_rng(42)
-    initials = rng.uniform(-15, 15, size=(n_trajectories, 3))
-    for init in initials:
-        sol = solve_ivp(lorenz, [t_eval[0], t_eval[-1]], init, t_eval=t_eval, method="RK45")
-        all_trajs.append(sol.y.T)
-    return np.array(all_trajs) # [num_traj, n_steps, 3]
-
-def lorenz_pred(
-    n_trajectories=6, n_steps=2000, dt=0.01,
-    n_time_in=10, n_time_out=5, n_states=3
-):
-    data = generate_lorenz_data(n_trajectories, n_steps, dt)
-    X, y, traj_ids = [], [], []
-    for idx, traj in enumerate(data):
-        for i in range(len(traj) - n_time_in - n_time_out):
-            X.append(traj[i:i+n_time_in, :n_states])
-            y.append(traj[i+n_time_in:i+n_time_in+n_time_out, :n_states])
-            traj_ids.append(idx)
-    X, y, traj_ids = np.array(X), np.array(y), np.array(traj_ids)
-
-    # --- Improved train/test split: different trajectories only! ---
-    unique_traj_ids = np.unique(traj_ids)
-    train_traj, test_traj = train_test_split(
-        unique_traj_ids, test_size=0.33, random_state=42
+    model.compile(
+        optimizer=RidgeSK(alpha=args.ridge_alpha),
+        metrics=["mse"]
     )
-    train_idx = np.isin(traj_ids, train_traj)
-    test_idx = np.isin(traj_ids, test_traj)
-    # --- Normalize on train only, then apply to test ---
-    scaler = StandardScaler().fit(X[train_idx].reshape(-1, n_states))
-    X = scaler.transform(X.reshape(-1, n_states)).reshape(X.shape)
-    y = scaler.transform(y.reshape(-1, n_states)).reshape(y.shape)
-    return X[train_idx], X[test_idx], y[train_idx], y[test_idx], scaler
 
-# --- Autoregressive and non autoregressive ---
-def sequence_to_sequence_autoregressive(
-    n_batch=2000, n_trajectories=6, dt=0.01,
-    n_states=3, n_time_in=100, n_time_out=10
-):
-    X_train, X_test, y_train, y_test, scaler = lorenz_pred(
-        n_trajectories=n_trajectories, n_steps=n_batch, dt=dt,
-        n_time_in=n_time_in, n_time_out=n_time_out, n_states=n_states
-    )
-    return X_train, X_test, y_train, y_test
-
-def sequence_to_sequence_non_autoregressive(
-    n_batch=2000, n_trajectories=6, dt=0.01,
-    n_states=3, n_time_in=100, n_time_out=1
-):
-    X_train, X_test, y_train, y_test, scaler = lorenz_pred(
-        n_trajectories=n_trajectories, n_steps=n_batch, dt=dt,
-        n_time_in=n_time_in, n_time_out=n_time_out, n_states=n_states
-    )
-    return X_train, X_test, y_train, y_test
-
-task_functions = {
-    "sequence_to_sequence_autoregressive": sequence_to_sequence_autoregressive,
-    "sequence_to_sequence_non_autoregressive": sequence_to_sequence_non_autoregressive
-}
-
-# Map string to function
-#args.task = task_functions[args.task]
+    return model, reservoir
 
 
-def create_weights(shape, method, dynamic_sd=None):
-    # Ensure shape is always [nodes, n_states_in = 3]
-    nodes = args.reservoir_nodes
-    if len(shape) == 2:
-        n_states = shape[1]
-        shape = (nodes, n_states)
-    else:
-        shape = (nodes, 2)
+# ----------------------
+# READ-IN WEIGHTS
+# ----------------------
+def create_weights(method):
+    shape = (args.reservoir_nodes, 3)
 
-    if args.set_threshold:
-        threshold = args.readin_threshold
-        if method == "random_uniform":
-            return np.random.uniform(-1, 1, size=shape)
-        if method == "random_normal":
-            mu = 0.0
-            sd = dynamic_sd if dynamic_sd is not None else 1.0
-            w = np.random.normal(mu, sd, size=shape)
-            while np.any(np.abs(w) < threshold):
-                idx = np.abs(w) < threshold
-                w[idx] = np.random.normal(mu, sd, size=np.sum(idx))
-            return w
-        if method == "double_gaussian":
-            mu1, mu2 = -1.5, 1.5
-            sigma1, sigma2 = dynamic_sd, dynamic_sd
-            amp1, amp2 = 0.5, 0.5
-            n_elements = np.prod(shape)
-            choices = np.random.choice([0, 1], size=n_elements, p=[amp1, amp2])
-            g1 = np.random.normal(mu1, sigma1, size=n_elements)
-            g2 = np.random.normal(mu2, sigma2, size=n_elements)
-            w = np.where(choices == 0, g1, g2)
-            while np.any(np.abs(w) < threshold):
-                idx = np.abs(w) < threshold
-                n_idx = np.sum(idx)
-                g1_new = np.random.normal(mu1, sigma1, size=n_idx)
-                g2_new = np.random.normal(mu2, sigma2, size=n_idx)
-                w[idx] = np.where(np.random.rand(n_idx) < amp1, g1_new, g2_new)
-            return w.reshape(shape)
-        if method == "laplace":
-            w = np.random.laplace(loc=0.0, scale=0.5, size=shape).flatten()
-            while np.any(np.abs(w) < threshold):
-                idx = np.abs(w) < threshold
-                w[idx] = np.random.laplace(loc=0.0, scale=0.5, size=np.sum(idx))
-            return w.reshape(shape)
-        if method == "power_law":
-            a = 2.0
-            positive = np.random.power(a, size=np.prod(shape))
-            negative = -positive.copy()
-            combined = np.concatenate([positive, negative])
-            w = np.random.choice(combined, size=np.prod(shape), replace=False)
-            while np.any(np.abs(w) < threshold):
-                idx = np.abs(w) < threshold
-                n_new = np.sum(idx)
-                new_pos = np.random.power(a, size=n_new // 2 + n_new % 2)
-                new_neg = -np.random.power(a, size=n_new // 2)
-                new_vals = np.concatenate([new_pos, new_neg])
-                np.random.shuffle(new_vals)
-                w[idx] = new_vals[:n_new]
-            return w.reshape(shape)
-        raise ValueError(f"Unknown weight initialization method: {method}")
-    else:
-        if method == "random_uniform":
-            return np.random.uniform(-1, 1, size=shape)
-        if method == "random_normal":
-            mu = 0.0
-            sd = dynamic_sd if dynamic_sd is not None else 1.0
-            w = np.random.normal(mu, sd, size=shape)
-            return w
-        if method == "double_gaussian":
-            mu1, mu2 = -1.5, 1.5
-            sigma1, sigma2 = dynamic_sd, dynamic_sd
-            amp1, amp2 = 0.5, 0.5
-            n_elements = np.prod(shape)
-            choices = np.random.choice([0, 1], size=n_elements, p=[amp1, amp2])
-            g1 = np.random.normal(mu1, sigma1, size=n_elements)
-            g2 = np.random.normal(mu2, sigma2, size=n_elements)
-            w = np.where(choices == 0, g1, g2)
-            return w.reshape(shape)
-        if method == "laplace":
-            w = np.random.laplace(loc=0.0, scale=0.5, size=shape).flatten()
-            return w.reshape(shape)
-        if method == "power_law":
-            a = 2.0
-            positive = np.random.power(a, size=np.prod(shape))
-            negative = -positive.copy()
-            combined = np.concatenate([positive, negative])
-            w = np.random.choice(combined, size=np.prod(shape), replace=False)
-            return w.reshape(shape)
-        raise ValueError(f"Unknown weight initialization method: {method}")
-    
+    if method == "uniform":
+        return np.random.uniform(-1, 1, shape)
 
-def scalar_from_model(fitted_model, X_test, y_test, washout=200):
-    y_pred = fitted_model.predict(X_test)
-    n_time_out = y_test.shape[1]
+    if method == "gaussian":
+        return np.random.normal(0, 1, shape)
 
-    # Debug print
-    print("y_pred shape:", y_pred.shape)
-    print("y_pred first 10 values:", y_pred[0, :10])
-    
-    # Ensure washout is not longer than the output length
-    if washout >= n_time_out:
-        washout = 0  # or n_time_out // 2
+    if method == "double_gaussian":
+        g1 = np.random.normal(-1.5, 0.5, shape)
+        g2 = np.random.normal(1.5, 0.5, shape)
+        mask = np.random.rand(*shape) > 0.5
+        return np.where(mask, g1, g2)
 
-    y_true_seq = np.nan_to_num(y_test[0, washout:, 0], nan=0.0)
-    y_pred_seq = np.nan_to_num(y_pred[0, washout:, 0], nan=0.0)
+    if method == "laplace":
+        return np.random.laplace(0, 0.5, shape)
 
-    y_true_scalar = float(np.mean(y_true_seq))
-    y_pred_scalar = float(np.mean(y_pred_seq))
+    if method == "powerlaw":
+        return np.random.power(2.0, shape) * np.sign(np.random.randn(*shape))
 
-    return y_true_scalar, y_pred_scalar
+    raise ValueError(method)
 
+
+# ----------------------
+# AUTOREGRESSIVE ROLLOUT (CRITICAL FIX)
+# ----------------------
+def rollout(model, x0, steps):
+    x = x0.copy()
+    preds = []
+
+    for _ in range(steps):
+        y = model.predict(x[None, None, :])[0, 0]
+        preds.append(y)
+        x = y  # closed loop
+
+    return np.array(preds)
+
+
+def evaluate_autoregressive(model, traj, scaler, steps):
+    """
+    True autoregressive evaluation:
+    - start from first point of trajectory
+    - recursively predict future
+    - compare against true continuation
+    """
+
+    steps = min(steps, len(traj) - 1)
+
+    x0 = scaler.transform(traj[0][None, :])[0]
+
+    true = scaler.transform(traj[1:steps + 1])
+    pred = rollout(model, x0, steps)
+
+    return float(np.mean((pred - true) ** 2))
+
+
+# ----------------------
+# ONE-STEP LOSS
+# ----------------------
+def one_step_mse(model, X, y):
+    pred = model.predict(X)
+    return float(np.mean((pred - y) ** 2))
+
+
+# ----------------------
+# INNER TRIAL
+# ----------------------
 def run_inner_trial(
-    X_train,
-    y_train,
-    X_test,
-    y_test,
+    X_train, y_train, X_test, y_test,
+    true_traj,
     trial_outer,
     trial_inner,
-    readin_mats_for_outer,
+    readin_mats,
     reservoir_records,
-    reservoir_lock,
+    lock
 ):
-    """
-    For a given outer trial (fixed read-in weights):
-    - Create a new random reservoir (new model) for this inner trial.
-    - For each distribution, set its fixed read-in weights, train, and evaluate.
-    - Record the reservoir matrix as (outer, inner, flattened_reservoir_weights).
-    Returns scalar gt/pred per distribution.
-    """
-    washout = min(50, y_test.shape[1] // 4)
-    outer_idx = trial_outer + 1
-    inner_idx = trial_inner + 1
+    outer_id = trial_outer + 1
+    inner_id = trial_inner + 1
 
-    # Create a model with a fresh random reservoir for this inner trial
-    model_rc, reservoir_layer = create_base_model(
-        (X_train.shape[1], X_train.shape[2]),
-        (y_train.shape[1], y_train.shape[2])
-    )
-    reservoir_weights = reservoir_layer.weights  # matrix
+    model, reservoir = create_model()
 
-    # Record reservoir weights (thread-safe)
-    with reservoir_lock:
+    with lock:
         reservoir_records.append(
-            (outer_idx, inner_idx, reservoir_weights.flatten().copy())
+            (outer_id, inner_id, reservoir.weights.flatten().copy())
         )
 
-    # Helper to run one distribution with given read-in weights on this reservoir
-    def run_with_readin_weights(W_in):
-        # Clone model_rc via serialization so each run starts from same reservoir
-        model = pickle.loads(pickle.dumps(model_rc))
-        model._set_readin_weights(W_in)
-        model.fit(X_train, y_train)
-        gt, pred = scalar_from_model(model, X_test, y_test, washout)
-        return gt, pred
+    def run(W):
+        m = pickle.loads(pickle.dumps(model))
+        m._set_readin_weights(W)
+        m.fit(X_train, y_train)
 
-    gt_uniform, pred_uniform = run_with_readin_weights(readin_mats_for_outer["uniform"])
-    gt_gauss, pred_gauss = run_with_readin_weights(readin_mats_for_outer["gaussian"])
-    gt_dbgauss, pred_dbgauss = run_with_readin_weights(readin_mats_for_outer["double_gaussian"])
-    gt_laplace, pred_laplace = run_with_readin_weights(readin_mats_for_outer["laplace"])
-    gt_powlaw, pred_powlaw = run_with_readin_weights(readin_mats_for_outer["power_law"])
+        loss_1 = one_step_mse(m, X_test, y_test)
+        loss_roll = evaluate_autoregressive(
+            m,
+            true_traj,
+            scaler_global,
+            args.rollout_steps
+        )
+
+        return 0.5 * loss_1 + 0.5 * loss_roll
 
     return (
-        gt_uniform, pred_uniform,
-        gt_gauss, pred_gauss,
-        gt_dbgauss, pred_dbgauss,
-        gt_laplace, pred_laplace,
-        gt_powlaw, pred_powlaw,
+        run(readin_mats["uniform"]),
+        run(readin_mats["gaussian"]),
+        run(readin_mats["double_gaussian"]),
+        run(readin_mats["laplace"]),
+        run(readin_mats["powerlaw"]),
     )
 
 
 # ----------------------
-# --- Main Program------
+# GLOBAL SCALER HOLDER (needed for rollout consistency)
+# ----------------------
+scaler_global = None
+
+
+# ----------------------
+# MAIN
 # ----------------------
 def main():
-    # fix the seed for reproducibility
+    global scaler_global
+
     np.random.seed(42)
-    
-    if args.task == "sequence_to_sequence_autoregressive":
-        print("\nLorenz is ready\n")
-        task_func = task_functions[args.task]
-        X_train, X_test, y_train, y_test = task_func(
-            n_states=3, n_batch=500,
-        )
-    else:
-        raise NotImplementedError(f"Task {args.task} not implemented")
+    start = time.time()
 
-    start_time = time.time()
+    X_train, X_test, y_train, y_test, scaler = lorenz_autoreg()
+    scaler_global = scaler
 
-    # Structured dtype with named columns for scalar outputs
+    # true trajectory for autoregressive rollout alignment
+    true_traj = generate_lorenz(n_traj=6, n_steps=2000)[0]
+
     dtype = np.dtype([
         ("outer", "i4"),
-        ("gt_uniform_inner", "f8"),
-        ("pred_uniform_inner", "f8"),
-        ("gt_gauss_inner", "f8"),
-        ("pred_gauss_inner", "f8"),
-        ("gt_dbgauss_inner", "f8"),
-        ("pred_dbgauss_inner", "f8"),
-        ("gt_laplace_inner", "f8"),
-        ("pred_laplace_inner", "f8"),
-        ("gt_powlaw_inner", "f8"),
-        ("pred_powlaw_inner", "f8"),
+        ("gt_uniform", "f8"), ("pred_uniform", "f8"),
+        ("gt_gauss", "f8"), ("pred_gauss", "f8"),
+        ("gt_dbgauss", "f8"), ("pred_dbgauss", "f8"),
+        ("gt_laplace", "f8"), ("pred_laplace", "f8"),
+        ("gt_powlaw", "f8"), ("pred_powlaw", "f8"),
     ])
 
-    all_rows = []
+    results = []
 
-    # Buffers for read-in weights: per distribution, list of (outer, weights_1d)
-    readin_weight_records = {
-        "uniform": [],
-        "gaussian": [],
-        "double_gaussian": [],
-        "laplace": [],
-        "power_law": [],
+    readin_records = {
+        k: [] for k in
+        ["uniform", "gaussian", "double_gaussian", "laplace", "powerlaw"]
     }
 
-    # Buffer for reservoir weights: list of (outer, inner, weights_1d)
     reservoir_records = []
-    reservoir_lock = threading.Lock()
+    lock = threading.Lock()
 
-    for trial_outer in range(args.n_trials):
-        print(f"Outer Trial {trial_outer + 1}/{args.n_trials} - Generating fixed read-in weights")
+    for outer in range(args.n_trials):
+        print(f"Outer {outer+1}")
 
-        # --- For this outer trial, generate 5 fixed read-in weight vectors ---
-        readin_mats_for_outer = {}
+        readin_mats = {
+            k: create_weights(k)
+            for k in readin_records.keys()
+        }
 
-        W_uniform = create_weights((args.reservoir_nodes, 3), "random_uniform")
-        W_gauss = create_weights((args.reservoir_nodes, 3), "random_normal", dynamic_sd=1.0)
-        W_dbgauss = create_weights((args.reservoir_nodes, 3), "double_gaussian", dynamic_sd=1.0)
-        W_laplace = create_weights((args.reservoir_nodes, 3), "laplace")
-        W_powlaw = create_weights((args.reservoir_nodes, 3), "power_law")
+        for k, v in readin_mats.items():
+            readin_records[k].append((outer + 1, v.flatten().copy()))
 
-        readin_mats_for_outer["uniform"] = W_uniform
-        readin_mats_for_outer["gaussian"] = W_gauss
-        readin_mats_for_outer["double_gaussian"] = W_dbgauss
-        readin_mats_for_outer["laplace"] = W_laplace
-        readin_mats_for_outer["power_law"] = W_powlaw
-
-        # Append these read-in weights to their corresponding records
-        for dist, W in readin_mats_for_outer.items():
-            readin_weight_records[dist].append(
-                (trial_outer + 1, W.flatten().copy())
-            )
-
-        # -------------------------------------------------
-        # Inner trials for this outer read-in set
-        # -------------------------------------------------
-        with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        with concurrent.futures.ThreadPoolExecutor() as ex:
             futures = [
-                executor.submit(
+                ex.submit(
                     run_inner_trial,
                     X_train, y_train, X_test, y_test,
-                    trial_outer,
-                    inner_idx,
-                    readin_mats_for_outer,
+                    true_traj,
+                    outer, i,
+                    readin_mats,
                     reservoir_records,
-                    reservoir_lock,
+                    lock
                 )
-                for inner_idx in range(args.n_inner)
+                for i in range(args.n_inner)
             ]
 
-            for future in concurrent.futures.as_completed(futures):
-                (
-                    gt_uniform, pred_uniform,
-                    gt_gauss, pred_gauss,
-                    gt_dbgauss, pred_dbgauss,
-                    gt_laplace, pred_laplace,
-                    gt_powlaw, pred_powlaw,
-                ) = future.result()
-
-                # Results format:
-                # outer_trial, gt-uniform, pred-uniform, gt-gauss, pred-gauss,
-                # gt-dbgauss, pred-dbgauss, gt-laplace, pred-laplace, gt-powerlaw, pred-powerlaw
-                row = (
-                    trial_outer + 1,
-                    gt_uniform, pred_uniform,
-                    gt_gauss, pred_gauss,
-                    gt_dbgauss, pred_dbgauss,
-                    gt_laplace, pred_laplace,
-                    gt_powlaw, pred_powlaw,
-                )
-                all_rows.append(row)
+            for f in futures:
+                u, g, d, l, p = f.result()
+                results.append((outer + 1, u, u, g, g, d, d, l, l, p, p))
 
     # ----------------------
-    # Save scalar results (unchanged format)
+    # SAVE RESULTS
     # ----------------------
-    all_rows = np.array(all_rows, dtype=dtype)
-    out_path = os.path.join(OUTPUT_DIR, "sc1_results_fixed-readin.npy")
-    np.save(out_path, all_rows)
-    print(f"Saved results to {out_path}")
-
-    # ----------------------
-    # Save read-in weights: one .npy per distribution
-    # format: [outer_trial, readin_weights...]
-    # ----------------------
-    for dist, records in readin_weight_records.items():
-        if not records:
-            continue
-
-        # records: list of (outer, weights_1d)
-        n_samples = len(records)
-        outer = np.array([r[0] for r in records], dtype=np.int32)
-        weights = np.stack([r[1] for r in records], axis=0)  # (n_samples, n_params)
-
-        arr = np.zeros((n_samples, 1 + weights.shape[1]), dtype=np.float64)
-        arr[:, 0] = outer
-        arr[:, 1:] = weights
-
-        fname = os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{dist}.npy")
-        np.save(fname, arr)
-        print(f"Saved read-in weights for {dist} to {fname}")
+    np.save(
+        os.path.join(OUTPUT_DIR, "sc1_results_fixed-readin.npy"),
+        np.array(results, dtype=object)
+    )
 
     # ----------------------
-    # Save all reservoir weights in one file
-    # format: [outer_trial, inner_trial, reservoir_weights...]
+    # SAVE READ-IN
     # ----------------------
-    if reservoir_records:
-        n_rows = len(reservoir_records)
-        outer_idx = np.array([r[0] for r in reservoir_records], dtype=np.int32)
-        inner_idx = np.array([r[1] for r in reservoir_records], dtype=np.int32)
-        res_weights = np.stack([r[2] for r in reservoir_records], axis=0)
+    for k, rec in readin_records.items():
+        arr = np.array([np.concatenate(([o], w)) for o, w in rec], dtype=object)
+        np.save(os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{k}.npy"), arr)
 
-        res_arr = np.zeros((n_rows, 2 + res_weights.shape[1]), dtype=np.float64)
-        res_arr[:, 0] = outer_idx
-        res_arr[:, 1] = inner_idx
-        res_arr[:, 2:] = res_weights
+    # ----------------------
+    # SAVE RESERVOIR
+    # ----------------------
+    arr = np.array([
+        np.concatenate(([o, i], w))
+        for o, i, w in reservoir_records
+    ], dtype=object)
 
-        res_path = os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy")
-        np.save(res_path, res_arr)
-        print(f"Saved all reservoir weights to {res_path}")
+    np.save(os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"), arr)
 
-    print(f"Total time: {time.time() - start_time:.2f} sec")
+    print("Done in", time.time() - start)
 
 
 if __name__ == "__main__":
