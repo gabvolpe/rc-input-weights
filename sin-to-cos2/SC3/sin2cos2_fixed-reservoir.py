@@ -175,14 +175,14 @@ def save_checkpoint(output_dir, readin_records, pred_records, reservoir_records,
 
     Files written
     -------------
-    sc1_ground_truth.npy          shape (n_time, n_states)  — saved every call but never changes
-    sc1_reservoir_weights.npy     shape (n_outer_so_far, 1 + n_reservoir_weights)
-    sc1_readin_weights_{dist}.npy shape (n_rows, 2 + n_nodes)   columns: outer, inner, w...
-    sc1_timeseries_{dist}.npy     shape (n_rows, 2 + n_time)    columns: outer, inner, t...
-    sc1_timeseries_gt.npy         shape (n_rows, 2 + n_time)    columns: outer, inner, t...
+    sc3_ground_truth.npy          shape (n_time, n_states)  — saved every call but never changes
+    sc3_reservoir_weights.npy     shape (n_outer_so_far, 1 + n_reservoir_weights)
+    sc3_readin_weights_{dist}.npy shape (n_rows, 2 + n_nodes)   columns: outer, inner, w...
+    sc3_timeseries_{dist}.npy     shape (n_rows, 2 + n_time)    columns: outer, inner, t...
+    sc3_timeseries_gt.npy         shape (n_rows, 2 + n_time)    columns: outer, inner, t...
     """
     # Ground truth — constant, written once (overwrite is a no-op after first call)
-    np.save(os.path.join(output_dir, "sc1_ground_truth.npy"), y_test[0])
+    np.save(os.path.join(output_dir, "sc3_ground_truth.npy"), y_test[0])
 
     # Reservoir weights — one row per completed outer trial
     if reservoir_records:
@@ -191,11 +191,11 @@ def save_checkpoint(output_dir, readin_records, pred_records, reservoir_records,
         arr        = np.zeros((len(reservoir_records), 1 + res_w.shape[1]), dtype=np.float64)
         arr[:, 0]  = outer
         arr[:, 1:] = res_w
-        np.save(os.path.join(output_dir, "sc1_reservoir_weights.npy"), arr)
+        np.save(os.path.join(output_dir, "sc3_reservoir_weights.npy"), arr)
 
     # Read-in weights and predictions — one file per distribution
-    _save_records(readin_records, os.path.join(output_dir, "sc1_readin_weights_{}.npy"))
-    _save_records(pred_records,   os.path.join(output_dir, "sc1_timeseries_{}.npy"))
+    _save_records(readin_records, os.path.join(output_dir, "sc3_readin_weights_{}.npy"))
+    _save_records(pred_records,   os.path.join(output_dir, "sc3_timeseries_{}.npy"))
 
     n_outer = len(reservoir_records)
     print(f"  [checkpoint] Saved after outer trial {n_outer}")

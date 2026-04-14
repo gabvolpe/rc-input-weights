@@ -210,24 +210,24 @@ def main():
 
     # ✅ CORRECT ground truth (single source of truth)
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"),
         y_test[0]
     )
 
     save_array(
-        os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_reservoir_weights.npy"),
         reservoir_records
     )
 
     for k in dist_keys:
         save_array(
-            os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{k}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_readin_weights_{k}.npy"),
             readin_records[k]
         )
 
     for k in dist_keys:
         save_array(
-            os.path.join(OUTPUT_DIR, f"sc1_timeseries_{k}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_timeseries_{k}.npy"),
             timeseries_records[k]
         )
 

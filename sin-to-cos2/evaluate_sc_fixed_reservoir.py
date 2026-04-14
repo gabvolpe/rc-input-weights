@@ -241,14 +241,14 @@ legend_handles = [
     mpatches.Patch(
         facecolor="dimgray",   
         alpha=0.9,
-        label="Read-in effect (between)"
+        label= "Reservoir effect (between)" # instead of "Read-in effect (between)"
     ),
     mpatches.Patch(
         facecolor="0.6",   # lighter for contrast
         hatch="///",
         edgecolor="white",
         alpha=0.7,
-        label="Reservoir effect (within)"
+        label= "Read-in effect (within)" # instead of "Reservoir effect (within)"
     ),
 ]
 #ax.legend(framealpha=0.9)

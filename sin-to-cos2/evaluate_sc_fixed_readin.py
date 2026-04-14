@@ -217,8 +217,19 @@ print("Saved best prediction plot")
 # ------------------------------------------------------------
 # VARIANCE DECOMPOSITION (CORRECTED)
 # ------------------------------------------------------------
-readin_effect = {}      # BETWEEN read-in sets
-reservoir_effect = {}   # WITHIN read-in sets
+# ------------------------------------------------------------------ #
+# Variance decomposition:  read-in vs. reservoir contribution
+#
+# One-way ANOVA decomposition per distribution:
+#   var_between — variance of per-read-in mean R² across read-ins
+#                 (how much the read-in choice shifts average performance)
+#   var_within  — mean of per-read-in R² variances across inner trials
+#                 (how much the reservoir choice shift performance for a
+#                  fixed read-in set)
+# Both are normalised to their sum so the bars reach 100%.
+# ------------------------------------------------------------------ #
+readin_effect = {}      # variance BETWEEN read-in sets
+reservoir_effect = {}   # variance WITHIN read-in sets
 
 for d in DISTRIBUTIONS:
 
@@ -241,8 +252,8 @@ x = np.arange(len(DISTRIBUTIONS))
 width = 0.35
 
 for i, (label, source, hatch) in enumerate([
-    ("Read-in effect (between)", readin_effect, ""),
-    ("Reservoir effect (within)", reservoir_effect, "///"),
+    ("Read-in (between)", readin_effect, ""),
+    ("Reservoir (within)", reservoir_effect, "///"),
 ]):
     totals = np.array([
         readin_effect[d] + reservoir_effect[d]
