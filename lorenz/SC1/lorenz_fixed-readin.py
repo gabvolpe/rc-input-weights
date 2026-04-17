@@ -1,5 +1,5 @@
 """
-Sine-to-Cosine^2 — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
+Lorenz — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
 Constraint Set 1: full input (no masking), no near-zero read-in weights.
 Gaussian SD is fixed at 1.0; no SD optimisation is performed.
 
@@ -58,7 +58,7 @@ parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-3)
 
 parser.add_argument("--readin_threshold", type=float, default=1e-3)
-parser.add_argument("--set_threshold", action="store_true")
+parser.add_argument("--set_threshold", type=bool, default=True)
 
 parser.add_argument("--parallel", action="store_true", default=True)
 
