@@ -1,12 +1,21 @@
 """
 Evaluation: Fixed-Reservoir experiment for specified SC — Lorenz.
 
-Loads results from sin-to-cos2/outputs/, computes R² scores per
-(reservoir, read-in sample, distribution), and produces a grouped violin
-plot showing per-reservoir score distributions coloured by distribution.
+Loads results from lorenz/outputs/fixed-reservoir/, computes R² scores per
+(reservoir, read-in sample, distribution), and produces:
+- grouped violin plot
+- best-prediction plot
+- variance decomposition
+- R² heatmap
 
-Please specify which set constraint (SC1, SC2, or SC3) you want to evaluate by inizializing the following variable SET_CONSTRAINT (e.g. "1" for SC1).
+This version assumes CODE 2 saves:
+- sc1_ground_truth.npy                shape (n_time, 3)
+- sc1_reservoir_weights.npy           shape (n_outer, 1 + n_reservoir_weights)
+- sc1_readin_weights_{dist}.npy       shape (n_rows, 2 + n_nodes * n_inputs)
+- sc1_timeseries_{dist}.npy           shape (n_rows, 2 + n_time * n_states)
+- sc1_timeseries_gt.npy               shape (n_rows, 2 + n_time * n_states)
 """
+
 
 import os
 import sys

@@ -1,317 +1,216 @@
 """
-Lorenz RC - Autoregressive with 1-step prediction
+Lorenz — Fixed-Reservoir Experiment (OPTIMIZED)
 
-Adds:
-1. Saving rollout MSE results
-2. Saving read-in weights
-3. Saving reservoir weights
+Produces EXACT same output structure as sin-to-cos2 version:
+- sc1_ground_truth.npy
+- sc1_reservoir_weights.npy
+- sc1_readin_weights_{dist}.npy
+- sc1_timeseries_{dist}.npy
+- sc1_timeseries_gt.npy
 
-Notes:
-- This version fixes trajectory alignment for rollout evaluation.
-- It evaluates autoregressive forecasting on contiguous Lorenz trajectories.
-- It scales state variables using StandardScaler fit on training trajectories only.
-- It saves one reservoir per outer trial and read-in weights per inner trial and distribution.
+Optimizations:
+- Training subsampling
+- Clean shape handling
+- Minimal overhead per trial
 """
 
 import os
+import sys
 import numpy as np
 import time
 import argparse
 import pickle
 import threading
-import concurrent.futures
 
-from scipy.integrate import solve_ivp
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from pyreco.custom_models import RC
-from pyreco.layers import InputLayer, ReadoutLayer, RandomReservoirLayer
-from pyreco.optimizers import RidgeSK
+from utils.helpers import (
+    load_dataset,
+    create_model,
+    predict_sequences,
+    sample_readin_weights,
+    assert_weights_above_threshold,
+)
 
-
-# ----------------------
-# Output
-# ----------------------
-OUTPUT_DIR = "lorenz/outputs/fixed-reservoir"
+# ------------------------------------------------------------
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "outputs",
+    "fixed-reservoir"
+)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-# ----------------------
-# Args
-# ----------------------
+# ------------------------------------------------------------
 parser = argparse.ArgumentParser()
+
 parser.add_argument("--n_trials", type=int, default=2)
-parser.add_argument("--n_inner", type=int, default=3)
-parser.add_argument("--reservoir_nodes", type=int, default=300)
+parser.add_argument("--n_inner", type=int, default=2)
+
+parser.add_argument("--reservoir_nodes", type=int, default=200)  # reduced default
 parser.add_argument("--density", type=float, default=0.1)
 parser.add_argument("--spectral_radius", type=float, default=0.9)
 parser.add_argument("--leakage_rate", type=float, default=0.5)
 parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-3)
-parser.add_argument("--rollout_steps", type=int, default=5)
+
+parser.add_argument("--readin_threshold", type=float, default=1e-3)
+parser.add_argument("--set_threshold", action="store_true")
+
+# Training subsample size
+parser.add_argument("--max_train_samples", type=int, default=5000)
+
 args = parser.parse_args()
 
+GAUSS_SD = 1.0
+THRESHOLD = args.readin_threshold if args.set_threshold else None
 
-# ----------------------
-# Lorenz system
-# ----------------------
-sigma, beta, rho = 10, 8/3, 28
-
-
-def lorenz(t, s):
-    x, y, z = s
-    return [sigma * (y - x), x * (rho - z) - y, x * y - beta * z]
-
-
-def generate_lorenz(n_traj=5, n_steps=2000, dt=0.01):
-    t = np.linspace(0, dt * (n_steps - 1), n_steps)
-    data = []
-    initials = np.random.uniform(-10, 10, (n_traj, 3))
-    for x0 in initials:
-        sol = solve_ivp(lorenz, [t[0], t[-1]], x0, t_eval=t)
-        data.append(sol.y.T)
-    return np.array(data)  # (traj, time, 3)
-
-
-# ----------------------
-# AUTOREGRESSIVE DATA
-# ----------------------
-def lorenz_autoreg(n_traj=5, n_steps=2000, dt=0.01):
+# ------------------------------------------------------------
+def flatten_ts(x):
     """
-    Build a one-step autoregressive dataset from contiguous Lorenz trajectories.
-
-    Each sample is:
-        X_t -> X_{t+1}
-
-    Returns:
-        X_train, X_test, y_train, y_test, traj_train, traj_test, scaler
-    where X/y are shaped (samples, 1, 3).
+    Convert any (samples, T, dim) → flat 1D signal (like evaluation expects)
     """
-    data = generate_lorenz(n_traj=n_traj, n_steps=n_steps, dt=dt)
+    return np.asarray(x).reshape(-1)
 
-    train_data, test_data = train_test_split(data, test_size=0.3, random_state=42)
+# ------------------------------------------------------------
+def _fit_and_predict(model_serialized, weights, X_train, y_train, X_test, y_test):
+    model = pickle.loads(model_serialized)
 
-    X_train_list, y_train_list, train_ids = [], [], []
-    X_test_list, y_test_list, test_ids = [], [], []
-
-    for traj_id, traj in enumerate(train_data):
-        for t in range(len(traj) - 1):
-            X_train_list.append(traj[t])
-            y_train_list.append(traj[t + 1])
-            train_ids.append(traj_id)
-
-    for traj_id, traj in enumerate(test_data):
-        for t in range(len(traj) - 1):
-            X_test_list.append(traj[t])
-            y_test_list.append(traj[t + 1])
-            test_ids.append(traj_id)
-
-    X_train = np.array(X_train_list)
-    y_train = np.array(y_train_list)
-    X_test = np.array(X_test_list)
-    y_test = np.array(y_test_list)
-
-    scaler = StandardScaler().fit(X_train)
-    X_train = scaler.transform(X_train)
-    y_train = scaler.transform(y_train)
-    X_test = scaler.transform(X_test)
-    y_test = scaler.transform(y_test)
-
-    X_train = X_train[:, None, :]
-    y_train = y_train[:, None, :]
-    X_test = X_test[:, None, :]
-    y_test = y_test[:, None, :]
-
-    return X_train, X_test, y_train, y_test, scaler
-
-
-def get_test_trajectory(n_traj=5, n_steps=2000, dt=0.01):
-    """
-    Build one fresh Lorenz test trajectory for rollout evaluation.
-    """
-    data = generate_lorenz(n_traj=n_traj, n_steps=n_steps, dt=dt)
-    _, test_data = train_test_split(data, test_size=0.3, random_state=42)
-    return test_data[0]
-
-
-# ----------------------
-# MODEL
-# ----------------------
-def create_model():
-    model = RC()
-
-    # RC expects (time_steps, features)
-    model.add(InputLayer(input_shape=(1, 3)))
-
-    reservoir = RandomReservoirLayer(
-        nodes=args.reservoir_nodes,
-        density=args.density,
-        activation="tanh",
-        spec_rad=args.spectral_radius,
-        leakage_rate=args.leakage_rate,
-        fraction_input=args.fraction_input
-    )
-
-    model.add(reservoir)
-
-    # Predict the next 3D state
-    model.add(ReadoutLayer(output_shape=(1, 3), fraction_out=1.0))
-
-    model.compile(
-        optimizer=RidgeSK(alpha=args.ridge_alpha),
-        metrics=["mse"]
-    )
-
-    return model, reservoir
-
-
-# ----------------------
-# WEIGHTS
-# ----------------------
-def create_weights(method):
-    shape = (args.reservoir_nodes, 3)
-
-    if method == "uniform":
-        return np.random.uniform(-1, 1, size=shape)
-
-    if method == "gaussian":
-        return np.random.normal(0, 1, size=shape)
-
-    if method == "double_gaussian":
-        g1 = np.random.normal(-1.5, 0.5, size=shape)
-        g2 = np.random.normal(1.5, 0.5, size=shape)
-        mask = np.random.rand(*shape) > 0.5
-        return np.where(mask, g1, g2)
-
-    if method == "laplace":
-        return np.random.laplace(0, 0.5, size=shape)
-
-    if method == "powerlaw":
-        return np.random.power(2.0, size=shape) * np.sign(np.random.randn(*shape))
-
-    raise ValueError(f"Unknown method: {method}")
-
-
-# ----------------------
-# ROLLOUT
-# ----------------------
-def rollout(model, x0, steps=200):
-    x = x0.copy()
-    preds = []
-    for _ in range(steps):
-        y = model.predict(x[None, None, :])[0, 0]
-        preds.append(y)
-        x = y
-    return np.array(preds)
-
-
-def rollout_mse(model, true_traj, scaler, steps=200):
-    """
-    Compare recursive prediction against the corresponding true continuation
-    from the same trajectory.
-    """
-    steps = min(steps, len(true_traj) - 1)
-    x0 = scaler.transform(true_traj[0][None, :])[0]
-    true = scaler.transform(true_traj[1:steps + 1])
-    pred = rollout(model, x0, steps=steps)
-    return float(np.mean((pred - true) ** 2))
-
-
-# ----------------------
-# INNER TRIAL
-# ----------------------
-def run_inner(model_serial, X_train, y_train, true_rollout_traj, scaler, method):
-    model = pickle.loads(model_serial)
-
-    W = create_weights(method)
-    model._set_readin_weights(W)
-
+    model._set_readin_weights(weights)
     model.fit(X_train, y_train)
 
-    mse = rollout_mse(model, true_rollout_traj, scaler, steps=args.rollout_steps)
+    gt_seq, pred_seq = predict_sequences(model, X_test, y_test, channels=0)
 
-    return mse, W
+    return flatten_ts(gt_seq), flatten_ts(pred_seq)
 
+# ------------------------------------------------------------
+def run_inner_trial(
+    model_serialized,
+    X_train, y_train, X_test, y_test,
+    outer, inner,
+    readin_records, pred_records, lock
+):
+    outer_id = outer + 1
+    inner_id = inner + 1
 
-# ----------------------
-# MAIN
-# ----------------------
+    shape = (args.reservoir_nodes, 3)
+
+    weights = {
+        "uniform": sample_readin_weights(shape, "random_uniform", threshold=THRESHOLD),
+        "gaussian": sample_readin_weights(shape, "random_normal", sd=GAUSS_SD, threshold=THRESHOLD),
+        "double_gaussian": sample_readin_weights(shape, "double_gaussian", sd=GAUSS_SD, threshold=THRESHOLD),
+        "laplace": sample_readin_weights(shape, "laplace", threshold=THRESHOLD),
+        "power_law": sample_readin_weights(shape, "power_law", threshold=THRESHOLD),
+    }
+
+    for k, w in weights.items():
+        assert_weights_above_threshold(w, THRESHOLD, k)
+
+    gt_seq, pred_u = _fit_and_predict(model_serialized, weights["uniform"], X_train, y_train, X_test, y_test)
+    _, pred_g = _fit_and_predict(model_serialized, weights["gaussian"], X_train, y_train, X_test, y_test)
+    _, pred_d = _fit_and_predict(model_serialized, weights["double_gaussian"], X_train, y_train, X_test, y_test)
+    _, pred_l = _fit_and_predict(model_serialized, weights["laplace"], X_train, y_train, X_test, y_test)
+    _, pred_p = _fit_and_predict(model_serialized, weights["power_law"], X_train, y_train, X_test, y_test)
+
+    with lock:
+        for k, w in weights.items():
+            readin_records[k].append((outer_id, inner_id, w.flatten().copy()))
+
+        pred_records["gt"].append((outer_id, inner_id, gt_seq))
+        pred_records["uniform"].append((outer_id, inner_id, pred_u))
+        pred_records["gaussian"].append((outer_id, inner_id, pred_g))
+        pred_records["double_gaussian"].append((outer_id, inner_id, pred_d))
+        pred_records["laplace"].append((outer_id, inner_id, pred_l))
+        pred_records["power_law"].append((outer_id, inner_id, pred_p))
+
+# ------------------------------------------------------------
+def save_records(records, path_template):
+    for key, entries in records.items():
+        if not entries:
+            continue
+
+        outer = np.array([e[0] for e in entries])
+        inner = np.array([e[1] for e in entries])
+        data = np.stack([e[2] for e in entries])
+
+        arr = np.zeros((len(entries), 2 + data.shape[1]))
+        arr[:, 0] = outer
+        arr[:, 1] = inner
+        arr[:, 2:] = data
+
+        np.save(path_template.format(key), arr)
+
+# ------------------------------------------------------------
 def main():
     np.random.seed(42)
-    start = time.time()
 
-    X_train, X_test, y_train, y_test, scaler = lorenz_autoreg()
+    X_train, X_test, y_train, y_test = load_dataset("lorenz")
 
-    # Use a fresh, aligned trajectory for rollout evaluation
-    true_rollout_traj = get_test_trajectory()
+    # SPEEDUP: subsample training data
+    if len(X_train) > args.max_train_samples:
+        idx = np.random.choice(len(X_train), args.max_train_samples, replace=False)
+        X_train = X_train[idx]
+        y_train = y_train[idx]
 
-    distributions = ["uniform", "gaussian", "double_gaussian", "laplace", "powerlaw"]
+    dist_keys = ["uniform", "gaussian", "double_gaussian", "laplace", "power_law"]
 
-    readin_records = {d: [] for d in distributions}
+    readin_records = {k: [] for k in dist_keys}
+    pred_records = {k: [] for k in ["gt"] + dist_keys}
     reservoir_records = []
-    results = []
 
     lock = threading.Lock()
 
+    print(f"\nUsing {len(X_train)} training samples")
+
     for outer in range(args.n_trials):
-        print(f"Outer {outer + 1}")
+        print(f"[Reservoir {outer+1}/{args.n_trials}]")
 
-        model, reservoir = create_model()
-        model_serial = pickle.dumps(model)
+        model_rc, reservoir_layer = create_model(
+            input_shape=(X_train.shape[1], X_train.shape[2]),
+            output_shape=(y_train.shape[1], y_train.shape[2]),
+            nodes=args.reservoir_nodes,
+            density=args.density,
+            spectral_radius=args.spectral_radius,
+            leakage_rate=args.leakage_rate,
+            fraction_input=args.fraction_input,
+            ridge_alpha=args.ridge_alpha,
+        )
 
-        reservoir_records.append((outer + 1, reservoir.weights.flatten().copy()))
+        model_serialized = pickle.dumps(model_rc)
 
-        with concurrent.futures.ThreadPoolExecutor() as ex:
-            futures = [
-                ex.submit(
-                    run_inner,
-                    model_serial,
-                    X_train,
-                    y_train,
-                    true_rollout_traj,
-                    scaler,
-                    dist
-                )
-                for dist in distributions
-                for _ in range(args.n_inner)
-            ]
+        reservoir_records.append(
+            (outer + 1, reservoir_layer.weights.flatten().copy())
+        )
 
-            for i, f in enumerate(futures):
-                mse, W = f.result()
-                dist = distributions[i // args.n_inner]
-                with lock:
-                    readin_records[dist].append((outer + 1, W.flatten().copy()))
-                    results.append((outer + 1, dist, mse))
+        for inner in range(args.n_inner):
+            run_inner_trial(
+                model_serialized,
+                X_train, y_train, X_test, y_test,
+                outer, inner,
+                readin_records, pred_records, lock
+            )
+            print(f"  inner {inner+1}/{args.n_inner}")
 
-    # ----------------------
-    # SAVE RESULTS
-    # ----------------------
-    results_arr = np.array(results, dtype=object)
-    np.save(os.path.join(OUTPUT_DIR, "sc1_results_fixed-reservoir.npy"), results_arr)
+    # --------------------------------------------------------
+    # SAVE EVERYTHING (same format as sin-to-cos2)
+    # --------------------------------------------------------
+    #np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), flatten_ts(y_test[:, :, 0]))
+    
+    np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), y_test[0])
 
-    # ----------------------
-    # SAVE READ-IN WEIGHTS
-    # ----------------------
-    for dist, rec in readin_records.items():
-        arr = np.array([
-            np.concatenate(([outer], w))
-            for outer, w in rec
-        ], dtype=object)
-        np.save(os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{dist}.npy"), arr)
+    outer = np.array([r[0] for r in reservoir_records])
+    res_w = np.stack([r[1] for r in reservoir_records])
 
-    # ----------------------
-    # SAVE RESERVOIR
-    # ----------------------
-    arr = np.array([
-        np.concatenate(([outer], w))
-        for outer, w in reservoir_records
-    ], dtype=object)
+    arr = np.zeros((len(reservoir_records), 1 + res_w.shape[1]))
+    arr[:, 0] = outer
+    arr[:, 1:] = res_w
+
     np.save(os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"), arr)
 
-    print("\nSaved ALL required files.")
-    print("Done in", time.time() - start)
+    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc1_readin_weights_{}.npy"))
+    save_records(pred_records, os.path.join(OUTPUT_DIR, "sc1_timeseries_{}.npy"))
 
+    print("\nDONE")
 
+# ------------------------------------------------------------
 if __name__ == "__main__":
     main()
