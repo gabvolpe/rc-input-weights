@@ -1,366 +1,253 @@
 """
-Lorenz RC - Fixed Read-in / Variable Reservoir (TRUE AUTOREGRESSIVE)
+Sine-to-Cosine^2 — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
+Constraint Set 1: full input (no masking), no near-zero read-in weights.
+Gaussian SD is fixed at 1.0; no SD optimisation is performed.
 
-Structure:
-- OUTER trials = fixed READ-IN matrices (5 distributions)
-- INNER trials = different RANDOM reservoirs
-
-Evaluation:
-- One-step prediction (teacher forced)
-- Autoregressive rollout prediction (closed loop)
-
-Outputs (UNCHANGED FORMAT):
-1) sc1_readin_weights_{dist}.npy
-2) sc1_reservoir_weights.npy
-3) sc1_results_fixed-readin.npy
+Note that this code is more expensive than the one with fixed reservoirs as outer trials.
+The reason is simply that there: 
+    - 1 reservoir build
+    - many read-ins reuse it
+    i.e: cost per experiment=C_reservoir​ + N_readin​⋅ C_fit​
+Here: 
+    - 1 read-in set
+    - many reservoirs, each one triggers full pipeline
+    i.e: cost per experiment=N_reservoir ​⋅ (C_reservoir ​+ C_fit​)
 """
 
 import os
+import sys
 import numpy as np
-import time
 import argparse
-import pickle
-import threading
 import concurrent.futures
+import threading
+import pickle
 
-from scipy.integrate import solve_ivp
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from pyreco.custom_models import RC
-from pyreco.layers import InputLayer, ReadoutLayer, RandomReservoirLayer
-from pyreco.optimizers import RidgeSK
+from utils.helpers import (
+    load_dataset,
+    create_model,
+    predict_sequences,
+    sample_readin_weights,
+    assert_weights_above_threshold,
+)
 
-
-# ----------------------
+# ------------------------------------------------------------
 # OUTPUT
-# ----------------------
-OUTPUT_DIR = "lorenz/outputs/fixed-readin"
+# ------------------------------------------------------------
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "outputs",
+    "fixed-readin"
+)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-# ----------------------
-# ARGUMENTS
-# ----------------------
+# ------------------------------------------------------------
+# ARGS
+# ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2)
-parser.add_argument("--n_inner", type=int, default=3)
+parser.add_argument("--n_trials", type=int, default=2, help="Outer trials = fixed read-ins") #50
+parser.add_argument("--n_inner", type=int, default=2, help="Inner trials = variable reservoirs") #100
 
-parser.add_argument("--reservoir_nodes", type=int, default=300)
+parser.add_argument("--reservoir_nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.1)
 parser.add_argument("--spectral_radius", type=float, default=0.9)
 parser.add_argument("--leakage_rate", type=float, default=0.5)
 parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-3)
 
-parser.add_argument("--rollout_steps", type=int, default=5)
+parser.add_argument("--readin_threshold", type=float, default=1e-3)
+parser.add_argument("--set_threshold", action="store_true")
+
+parser.add_argument("--parallel", action="store_true", default=True)
 
 args = parser.parse_args()
 
+# ------------------------------------------------------------
+# CONSTANTS
+# ------------------------------------------------------------
+GAUSS_SD = 1.0
+THRESHOLD = args.readin_threshold if args.set_threshold else None
 
-# ----------------------
-# LORENZ SYSTEM
-# ----------------------
-sigma, beta, rho = 10, 8/3, 28
+dist_keys = ["uniform", "gaussian", "double_gaussian", "laplace", "power_law"]
+lock = threading.Lock()
 
+# ------------------------------------------------------------
+# CORE MODEL RUN
+# ------------------------------------------------------------
+def run_model(model, W_in, X_train, y_train, X_test, y_test):
+    model._set_readin_weights(W_in)
+    model.fit(X_train, y_train)
+    return predict_sequences(model, X_test, y_test, channels=0)
 
-def lorenz(t, s):
-    x, y, z = s
-    return [
-        sigma * (y - x),
-        x * (rho - z) - y,
-        x * y - beta * z
-    ]
+# ------------------------------------------------------------
+# INNER TRIAL (VARIABLE RESERVOIR)
+# ------------------------------------------------------------
+def run_inner_trial(
+    model_serialized,
+    X_train, y_train, X_test, y_test,
+    outer, inner,
+    readin_set,
+    readin_records,
+    reservoir_records,
+    timeseries_records
+):
+    outer_id = outer + 1
+    inner_id = inner + 1
 
-
-def generate_lorenz(n_traj=5, n_steps=2000, dt=0.01):
-    t = np.linspace(0, dt * (n_steps - 1), n_steps)
-    data = []
-
-    initials = np.random.uniform(-10, 10, (n_traj, 3))
-
-    for x0 in initials:
-        sol = solve_ivp(lorenz, [t[0], t[-1]], x0, t_eval=t)
-        data.append(sol.y.T)
-
-    return np.array(data)
-
-
-# ----------------------
-# AUTOREGRESSIVE DATA (ONE-STEP TRAINING)
-# ----------------------
-def lorenz_autoreg(n_traj=6, n_steps=2000, dt=0.01):
-    data = generate_lorenz(n_traj, n_steps, dt)
-
-    train, test = train_test_split(data, test_size=0.3, random_state=42)
-
-    X_train, y_train = [], []
-    X_test, y_test = [], []
-
-    for traj in train:
-        for t in range(len(traj) - 1):
-            X_train.append(traj[t])
-            y_train.append(traj[t + 1])
-
-    for traj in test:
-        for t in range(len(traj) - 1):
-            X_test.append(traj[t])
-            y_test.append(traj[t + 1])
-
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
-    X_test = np.array(X_test)
-    y_test = np.array(y_test)
-
-    scaler = StandardScaler().fit(X_train)
-
-    X_train = scaler.transform(X_train)[:, None, :]
-    y_train = scaler.transform(y_train)[:, None, :]
-    X_test = scaler.transform(X_test)[:, None, :]
-    y_test = scaler.transform(y_test)[:, None, :]
-
-    return X_train, X_test, y_train, y_test, scaler
-
-
-# ----------------------
-# MODEL
-# ----------------------
-def create_model():
-    model = RC()
-
-    model.add(InputLayer(input_shape=(1, 3)))
-
-    reservoir = RandomReservoirLayer(
+    # fresh reservoir per inner trial
+    model_base, reservoir_layer = create_model(
+        input_shape=(X_train.shape[1], X_train.shape[2]),
+        output_shape=(y_train.shape[1], y_train.shape[2]),
         nodes=args.reservoir_nodes,
         density=args.density,
-        activation="tanh",
-        spec_rad=args.spectral_radius,
+        spectral_radius=args.spectral_radius,
         leakage_rate=args.leakage_rate,
-        fraction_input=args.fraction_input
+        fraction_input=args.fraction_input,
+        ridge_alpha=args.ridge_alpha,
     )
 
-    model.add(reservoir)
+    reservoir_w = reservoir_layer.weights.flatten().copy()
 
-    model.add(ReadoutLayer(output_shape=(1, 3), fraction_out=1.0))
+    results = {}
 
-    model.compile(
-        optimizer=RidgeSK(alpha=args.ridge_alpha),
-        metrics=["mse"]
-    )
-
-    return model, reservoir
-
-
-# ----------------------
-# READ-IN WEIGHTS
-# ----------------------
-def create_weights(method):
-    shape = (args.reservoir_nodes, 3)
-
-    if method == "uniform":
-        return np.random.uniform(-1, 1, shape)
-
-    if method == "gaussian":
-        return np.random.normal(0, 1, shape)
-
-    if method == "double_gaussian":
-        g1 = np.random.normal(-1.5, 0.5, shape)
-        g2 = np.random.normal(1.5, 0.5, shape)
-        mask = np.random.rand(*shape) > 0.5
-        return np.where(mask, g1, g2)
-
-    if method == "laplace":
-        return np.random.laplace(0, 0.5, shape)
-
-    if method == "powerlaw":
-        return np.random.power(2.0, shape) * np.sign(np.random.randn(*shape))
-
-    raise ValueError(method)
-
-
-# ----------------------
-# AUTOREGRESSIVE ROLLOUT (CRITICAL FIX)
-# ----------------------
-def rollout(model, x0, steps):
-    x = x0.copy()
-    preds = []
-
-    for _ in range(steps):
-        y = model.predict(x[None, None, :])[0, 0]
-        preds.append(y)
-        x = y  # closed loop
-
-    return np.array(preds)
-
-
-def evaluate_autoregressive(model, traj, scaler, steps):
-    """
-    True autoregressive evaluation:
-    - start from first point of trajectory
-    - recursively predict future
-    - compare against true continuation
-    """
-
-    steps = min(steps, len(traj) - 1)
-
-    x0 = scaler.transform(traj[0][None, :])[0]
-
-    true = scaler.transform(traj[1:steps + 1])
-    pred = rollout(model, x0, steps)
-
-    return float(np.mean((pred - true) ** 2))
-
-
-# ----------------------
-# ONE-STEP LOSS
-# ----------------------
-def one_step_mse(model, X, y):
-    pred = model.predict(X)
-    return float(np.mean((pred - y) ** 2))
-
-
-# ----------------------
-# INNER TRIAL
-# ----------------------
-def run_inner_trial(
-    X_train, y_train, X_test, y_test,
-    true_traj,
-    trial_outer,
-    trial_inner,
-    readin_mats,
-    reservoir_records,
-    lock
-):
-    outer_id = trial_outer + 1
-    inner_id = trial_inner + 1
-
-    model, reservoir = create_model()
+    # evaluate all read-ins on same reservoir
+    for k in dist_keys:
+        _, pred = run_model(
+            model_base,
+            readin_set[k],
+            X_train, y_train, X_test, y_test
+        )
+        results[k] = np.asarray(pred)
 
     with lock:
-        reservoir_records.append(
-            (outer_id, inner_id, reservoir.weights.flatten().copy())
-        )
+        reservoir_records.append((outer_id, inner_id, reservoir_w))
 
-    def run(W):
-        m = pickle.loads(pickle.dumps(model))
-        m._set_readin_weights(W)
-        m.fit(X_train, y_train)
+        for k in dist_keys:
+            readin_records[k].append(
+                (outer_id, inner_id, readin_set[k].flatten().copy())
+            )
 
-        loss_1 = one_step_mse(m, X_test, y_test)
-        loss_roll = evaluate_autoregressive(
-            m,
-            true_traj,
-            scaler_global,
-            args.rollout_steps
-        )
+        for k in dist_keys:
+            timeseries_records[k].append(
+                (outer_id, inner_id, results[k].flatten().copy())
+            )
 
-        return 0.5 * loss_1 + 0.5 * loss_roll
+# ------------------------------------------------------------
+# SAVE HELPERS
+# ------------------------------------------------------------
+def save_records(records, path_template):
+    for k, entries in records.items():
+        if not entries:
+            continue
 
-    return (
-        run(readin_mats["uniform"]),
-        run(readin_mats["gaussian"]),
-        run(readin_mats["double_gaussian"]),
-        run(readin_mats["laplace"]),
-        run(readin_mats["powerlaw"]),
-    )
+        outer = np.array([e[0] for e in entries], dtype=np.int32)
+        inner = np.array([e[1] for e in entries], dtype=np.int32)
+        data  = np.stack([e[2] for e in entries], axis=0)
 
+        arr = np.zeros((len(entries), 2 + data.shape[1]), dtype=np.float64)
+        arr[:, 0] = outer
+        arr[:, 1] = inner
+        arr[:, 2:] = data
 
-# ----------------------
-# GLOBAL SCALER HOLDER (needed for rollout consistency)
-# ----------------------
-scaler_global = None
+        np.save(path_template.format(k), arr)
 
-
-# ----------------------
+# ------------------------------------------------------------
 # MAIN
-# ----------------------
+# ------------------------------------------------------------
 def main():
-    global scaler_global
-
     np.random.seed(42)
-    start = time.time()
 
-    X_train, X_test, y_train, y_test, scaler = lorenz_autoreg()
-    scaler_global = scaler
+    X_train, X_test, y_train, y_test = load_dataset("lorenz")
 
-    # true trajectory for autoregressive rollout alignment
-    true_traj = generate_lorenz(n_traj=6, n_steps=2000)[0]
-
-    dtype = np.dtype([
-        ("outer", "i4"),
-        ("gt_uniform", "f8"), ("pred_uniform", "f8"),
-        ("gt_gauss", "f8"), ("pred_gauss", "f8"),
-        ("gt_dbgauss", "f8"), ("pred_dbgauss", "f8"),
-        ("gt_laplace", "f8"), ("pred_laplace", "f8"),
-        ("gt_powlaw", "f8"), ("pred_powlaw", "f8"),
-    ])
-
-    results = []
-
-    readin_records = {
-        k: [] for k in
-        ["uniform", "gaussian", "double_gaussian", "laplace", "powerlaw"]
-    }
-
+    readin_records = {k: [] for k in dist_keys}
     reservoir_records = []
-    lock = threading.Lock()
+    timeseries_records = {k: [] for k in dist_keys}
 
+    n_states_in = X_train.shape[2]
+    readin_shape = (args.reservoir_nodes, n_states_in)
+
+    print("\nLorenz — Fixed Read-In | Variable Reservoir\n")
+
+    # --------------------------------------------------------
+    # OUTER LOOP = FIXED READ-INS
+    # --------------------------------------------------------
     for outer in range(args.n_trials):
-        print(f"Outer {outer+1}")
+        print(f"[Outer {outer+1}] sampling fixed read-ins")
 
-        readin_mats = {
-            k: create_weights(k)
-            for k in readin_records.keys()
+        readin_set = {
+            "uniform": sample_readin_weights(readin_shape, "random_uniform", threshold=THRESHOLD),
+            "gaussian": sample_readin_weights(readin_shape, "random_normal", sd=GAUSS_SD, threshold=THRESHOLD),
+            "double_gaussian": sample_readin_weights(readin_shape, "double_gaussian", sd=GAUSS_SD, threshold=THRESHOLD),
+            "laplace": sample_readin_weights(readin_shape, "laplace", threshold=THRESHOLD),
+            "power_law": sample_readin_weights(readin_shape, "power_law", threshold=THRESHOLD),
         }
 
-        for k, v in readin_mats.items():
-            readin_records[k].append((outer + 1, v.flatten().copy()))
+        for k, w in readin_set.items():
+            assert_weights_above_threshold(w, THRESHOLD, k)
 
-        with concurrent.futures.ThreadPoolExecutor() as ex:
-            futures = [
-                ex.submit(
-                    run_inner_trial,
+        # ----------------------------------------------------
+        # INNER LOOP = VARIABLE RESERVOIRS
+        # ----------------------------------------------------
+        if args.parallel:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
+                futures = [
+                    ex.submit(
+                        run_inner_trial,
+                        None,  # no serialized reuse needed
+                        X_train, y_train, X_test, y_test,
+                        outer, inner,
+                        readin_set,
+                        readin_records,
+                        reservoir_records,
+                        timeseries_records,
+                    )
+                    for inner in range(args.n_inner)
+                ]
+                for f in concurrent.futures.as_completed(futures):
+                    f.result()
+        else:
+            for inner in range(args.n_inner):
+                run_inner_trial(
+                    None,
                     X_train, y_train, X_test, y_test,
-                    true_traj,
-                    outer, i,
-                    readin_mats,
+                    outer, inner,
+                    readin_set,
+                    readin_records,
                     reservoir_records,
-                    lock
+                    timeseries_records,
                 )
-                for i in range(args.n_inner)
-            ]
 
-            for f in futures:
-                u, g, d, l, p = f.result()
-                results.append((outer + 1, u, u, g, g, d, d, l, l, p, p))
+        print(f"[Outer {outer+1}] done")
 
-    # ----------------------
-    # SAVE RESULTS
-    # ----------------------
+    # --------------------------------------------------------
+    # SAVE OUTPUTS
+    # --------------------------------------------------------
+
+    # ground truth (unchanged structure)
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_results_fixed-readin.npy"),
-        np.array(results, dtype=object)
+        os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"),
+        y_test[0]
     )
 
-    # ----------------------
-    # SAVE READ-IN
-    # ----------------------
-    for k, rec in readin_records.items():
-        arr = np.array([np.concatenate(([o], w)) for o, w in rec], dtype=object)
-        np.save(os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{k}.npy"), arr)
+    # reservoir weights
+    outer = np.array([r[0] for r in reservoir_records], dtype=np.int32)
+    inner = np.array([r[1] for r in reservoir_records], dtype=np.int32)
+    res_w = np.stack([r[2] for r in reservoir_records], axis=0)
 
-    # ----------------------
-    # SAVE RESERVOIR
-    # ----------------------
-    arr = np.array([
-        np.concatenate(([o, i], w))
-        for o, i, w in reservoir_records
-    ], dtype=object)
+    arr = np.zeros((len(reservoir_records), 2 + res_w.shape[1]), dtype=np.float64)
+    arr[:, 0] = outer
+    arr[:, 1] = inner
+    arr[:, 2:] = res_w
 
     np.save(os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"), arr)
 
-    print("Done in", time.time() - start)
+    # read-in + timeseries per distribution
+    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc1_readin_weights_{}.npy"))
+    save_records(timeseries_records, os.path.join(OUTPUT_DIR, "sc1_timeseries_{}.npy"))
+
+    print("\nDONE")
 
 
 if __name__ == "__main__":

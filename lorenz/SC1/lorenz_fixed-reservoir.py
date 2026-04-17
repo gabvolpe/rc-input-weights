@@ -1,12 +1,7 @@
 """
-Lorenz — Fixed-Reservoir Experiment (OPTIMIZED)
-
-Produces EXACT same output structure as sin-to-cos2 version:
-- sc1_ground_truth.npy
-- sc1_reservoir_weights.npy
-- sc1_readin_weights_{dist}.npy
-- sc1_timeseries_{dist}.npy
-- sc1_timeseries_gt.npy
+Sine-to-Cosine^2 — Unconditional Variability Extraction, fixed reservoir.
+Constraint Set 1: full input (no masking), no near-zero read-in weights.
+Gaussian SD is fixed at 1.0; no SD optimisation is performed.
 
 Optimizations:
 - Training subsampling
@@ -43,8 +38,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2)
-parser.add_argument("--n_inner", type=int, default=2)
+parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (reservoirs)") #50
+parser.add_argument("--n_inner",          type=int,   default=2,    help="Number of inner trials per reservoir") #100
 
 parser.add_argument("--reservoir_nodes", type=int, default=200)  # reduced default
 parser.add_argument("--density", type=float, default=0.1)
