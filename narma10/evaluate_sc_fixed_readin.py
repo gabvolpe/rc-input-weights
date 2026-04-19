@@ -310,6 +310,13 @@ plt.savefig(
     dpi=150
 )
 
+plt.savefig(
+    os.path.join(
+        RESULTS_DIR,
+        f"sc{SET_CONSTRAINT}_r2_violin.pdf"
+    )
+)
+
 plt.show()
 
 print(
@@ -434,6 +441,13 @@ plt.savefig(
     dpi=150
 )
 
+plt.savefig(
+    os.path.join(
+        RESULTS_DIR,
+        f"sc{SET_CONSTRAINT}_best_predictions.pdf"
+    )
+)
+
 plt.show()
 
 print(
@@ -445,109 +459,106 @@ print(
 # ------------------------------------------------------------
 # VARIANCE DECOMPOSITION
 # ------------------------------------------------------------
-readin_effect={}
-reservoir_effect={}
-
+readin_effect = {}      # variance BETWEEN read-in sets
+reservoir_effect = {}   # variance WITHIN read-in sets
 
 for d in DISTRIBUTIONS:
 
-    outer_means=np.array([
-
+    # mean performance per read-in set (averaged over reservoirs)
+    outer_means = np.array([
         r2_data[d][oid].mean()
-
         for oid in outer_ids
-
     ])
 
+    # variability across read-in sets
+    readin_effect[d] = outer_means.var()
 
-    readin_effect[d]=outer_means.var()
-
-
-    outer_vars=np.array([
-
+    # variability across reservoirs within each read-in
+    outer_vars = np.array([
         r2_data[d][oid].var()
-
         for oid in outer_ids
-
     ])
 
-
-    reservoir_effect[d]=outer_vars.mean()
-
+    reservoir_effect[d] = outer_vars.mean()
 
 
-fig,ax=plt.subplots(
-    figsize=(9,4)
-)
+# ------------------------------------------------------------
+# PLOT VARIANCE DECOMPOSITION (MATCHED STYLE)
+# ------------------------------------------------------------
+fig, ax = plt.subplots(figsize=(9, 4))
+
+x = np.arange(len(DISTRIBUTIONS))
+width = 0.35
 
 
-x=np.arange(
-    len(DISTRIBUTIONS)
-)
-
-width=.35
-
-
-for i,(source,hatch) in enumerate([
-
-    (readin_effect,""),
-    (reservoir_effect,"///")
-
+for i, (label, source, hatch) in enumerate([
+    ("Read-in (between)", readin_effect, ""),
+    ("Reservoir (within)", reservoir_effect, "///"),
 ]):
 
-    totals=np.array([
-
-        readin_effect[d]
-        +
-        reservoir_effect[d]
-
+    totals = np.array([
+        readin_effect[d] + reservoir_effect[d]
         for d in DISTRIBUTIONS
-
     ])
 
-
-    vals=np.array([
-
+    vals = np.array([
         source[d]
-
         for d in DISTRIBUTIONS
-
     ])
 
-
-    frac=np.where(
-        totals>0,
-        vals/totals*100,
-        0
-    )
-
+    frac = np.where(totals > 0, vals / totals * 100, 0)
 
     ax.bar(
-        x+(i-.5)*width,
+        x + (i - 0.5) * width,
         frac,
         width=width,
+        alpha=0.85 if i == 0 else 0.5,
         hatch=hatch,
-        color=[
-            DIST_COLORS[d]
-            for d in DISTRIBUTIONS
-        ],
-        alpha=.7
+        label=label,
+        color=[DIST_COLORS[d] for d in DISTRIBUTIONS],
+        edgecolor="white"
     )
 
 
 ax.set_xticks(x)
+ax.set_xticklabels([DIST_LABELS[d] for d in DISTRIBUTIONS])
 
-ax.set_xticklabels(
-    [
-        DIST_LABELS[d]
-        for d in DISTRIBUTIONS
-    ]
+ax.set_ylabel("Variance explained (%)")
+ax.set_ylim(0, 100)
+
+ax.axhline(
+    50,
+    color="black",
+    linewidth=0.8,
+    linestyle="--",
+    alpha=0.4
 )
 
-ax.set_ylim(
-    0,
-    100
+ax.set_title(
+    f"SC{SET_CONSTRAINT} Fixed-Read-in — Variance decomposition: read-in vs. reservoir\n"
+    "solid fill = read-in effect | hatched = reservoir effect"
 )
+
+
+# ------------------------------------------------------------
+# LEGEND (EXACT STYLE AS REQUESTED)
+# ------------------------------------------------------------
+legend_handles = [
+    mpatches.Patch(
+        facecolor="dimgray",
+        alpha=0.9,
+        label="Read-in effect (between)"
+    ),
+    mpatches.Patch(
+        facecolor="0.6",
+        hatch="///",
+        edgecolor="white",
+        alpha=0.7,
+        label="Reservoir effect (within)"
+    ),
+]
+
+ax.legend(handles=legend_handles, framealpha=0.9)
 
 
 plt.tight_layout()
@@ -555,17 +566,21 @@ plt.tight_layout()
 plt.savefig(
     os.path.join(
         RESULTS_DIR,
-        f"sc{SET_CONSTRAINT}_variance.png"
+        f"sc{SET_CONSTRAINT}_variance_decomposition.png"
     ),
     dpi=150
 )
 
-plt.show()
-
-print(
-    "Saved variance plot"
+plt.savefig(
+    os.path.join(
+        RESULTS_DIR,
+        f"sc{SET_CONSTRAINT}_variance_decomposition.pdf"
+    )
 )
 
+plt.show()
+
+print("Saved variance plot")
 
 
 # ------------------------------------------------------------
@@ -664,6 +679,13 @@ plt.savefig(
         f"sc{SET_CONSTRAINT}_heatmap.png"
     ),
     dpi=150
+)
+
+plt.savefig(
+    os.path.join(
+        RESULTS_DIR,
+        f"sc{SET_CONSTRAINT}_heatmap.pdf"
+    )
 )
 
 plt.show()
