@@ -49,8 +49,8 @@ EVAL_DISTS = list(DIST_MAP.keys())
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_outer", type=int, default=2, help="Number of read-in sets (outer)")
-parser.add_argument("--n_inner", type=int, default=3, help="Number of reservoirs per read-in")
+parser.add_argument("--n_outer", type=int, default=2,     help="Number of outer trials (read-in)")
+parser.add_argument("--n_inner", type=int, default=3,    help="Number of inner trials per read-in")
 
 parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
@@ -60,9 +60,16 @@ parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-6)
 
 parser.add_argument("--readin_threshold", type=float, default=1e-3)
+parser.add_argument("--set_threshold",    type=bool,  default=True)
 parser.add_argument("--parallel", action="store_true")
 
 args = parser.parse_args()
+
+# ------------------------------------------------------------
+# READ-IN CONTROL
+# ------------------------------------------------------------
+GAUSS_SD = 1.0
+THRESHOLD = args.readin_threshold if args.set_threshold else None
 
 # ------------------------------------------------------------
 # DATA
@@ -143,17 +150,19 @@ def main():
             d: sample_readin_weights(
                 shape=(args.nodes, X_train.shape[2]),
                 method=DIST_MAP[d],
-                threshold=args.readin_threshold
+                sd=GAUSS_SD if DIST_MAP[d] in ["random_normal", "double_gaussian"] else None,
+                threshold=THRESHOLD
             )
             for d in EVAL_DISTS
         }
 
         for d in EVAL_DISTS:
-            assert_weights_above_threshold(
-                readin_sets[d],
-                args.readin_threshold,
-                d
-            )
+            if THRESHOLD is not None:
+                assert_weights_above_threshold(
+                    readin_sets[d],
+                    THRESHOLD,
+                    d
+                )
 
         # ----------------------------------------------------
         # INNER LOOP = VARIABLE RESERVOIRS
