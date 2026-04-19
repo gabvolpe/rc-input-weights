@@ -1,7 +1,7 @@
 """
 Evaluation: Fixed-Reservoir experiment for specified SC — Mackey-Glass.
 
-Loads results from sin-to-cos2/outputs/, computes R² scores per
+Loads results from mackey-glass/outputs/, computes R² scores per
 (reservoir, read-in sample, distribution), and produces a grouped violin
 plot showing per-reservoir score distributions coloured by distribution.
 

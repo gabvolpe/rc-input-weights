@@ -50,8 +50,8 @@ EVAL_DISTS = list(DIST_MAP.keys())
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2)
-parser.add_argument("--n_inner", type=int, default=3)
+parser.add_argument("--n_trials", type=int, default=2,    help="Number of outer trials (reservoirs)") # 50
+parser.add_argument("--n_inner",  type=int, default=3,    help="Number of inner trials per reservoir") #100
 
 parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
