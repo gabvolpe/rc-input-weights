@@ -188,9 +188,8 @@ def main():
     # --------------------------------------------------------
     # SAVE EVERYTHING (same format as sin-to-cos2)
     # --------------------------------------------------------
-    #np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), flatten_ts(y_test[:, :, 0]))
     
-    np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), y_test[0])
+    np.save(os.path.join(OUTPUT_DIR, "sc3_ground_truth.npy"), y_test[0])
 
     outer = np.array([r[0] for r in reservoir_records])
     res_w = np.stack([r[1] for r in reservoir_records])
@@ -199,10 +198,10 @@ def main():
     arr[:, 0] = outer
     arr[:, 1:] = res_w
 
-    np.save(os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"), arr)
+    np.save(os.path.join(OUTPUT_DIR, "sc3_reservoir_weights.npy"), arr)
 
-    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc1_readin_weights_{}.npy"))
-    save_records(pred_records, os.path.join(OUTPUT_DIR, "sc1_timeseries_{}.npy"))
+    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc3_readin_weights_{}.npy"))
+    save_records(pred_records, os.path.join(OUTPUT_DIR, "sc3_timeseries_{}.npy"))
 
     print("\nDONE")
 

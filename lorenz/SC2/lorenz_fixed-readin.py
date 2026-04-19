@@ -227,7 +227,7 @@ def main():
 
     # ground truth (unchanged structure)
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"),
         y_test[0]
     )
 
@@ -241,11 +241,11 @@ def main():
     arr[:, 1] = inner
     arr[:, 2:] = res_w
 
-    np.save(os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"), arr)
+    np.save(os.path.join(OUTPUT_DIR, "sc2_reservoir_weights.npy"), arr)
 
     # read-in + timeseries per distribution
-    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc1_readin_weights_{}.npy"))
-    save_records(timeseries_records, os.path.join(OUTPUT_DIR, "sc1_timeseries_{}.npy"))
+    save_records(readin_records, os.path.join(OUTPUT_DIR, "sc2_readin_weights_{}.npy"))
+    save_records(timeseries_records, os.path.join(OUTPUT_DIR, "sc2_timeseries_{}.npy"))
 
     print("\nDONE")
 
