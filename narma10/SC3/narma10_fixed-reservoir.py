@@ -1,7 +1,7 @@
 """
 NARMA-10 — Unconditional Variability Extraction, fixed reservoir.
 Constraint Set 3: full input (no masking), near-zero read-in weights allowed.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os
@@ -50,8 +50,8 @@ EVAL_DISTS = list(DIST_MAP.keys())
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (reservoirs)")
-parser.add_argument("--n_inner",          type=int,   default=3,    help="Number of inner trials per reservoir")
+parser.add_argument("--n_trials", type=int, default=50,     help="Number of outer trials (reservoirs)")
+parser.add_argument("--n_inner",  type=int, default=100,    help="Number of inner trials per reservoir")
 parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
 parser.add_argument("--spectral_radius", type=float, default=0.9)

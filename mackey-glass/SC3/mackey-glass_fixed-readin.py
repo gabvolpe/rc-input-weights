@@ -1,7 +1,7 @@
 """
 Mackey-Glass — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
 Constraint Set 3: full input (no masking), near-zero read-in weights allowed.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os
@@ -236,7 +236,7 @@ def main():
             timeseries_records[k]
         )
 
-    print("\nSaved all Mackey-Glass SC1 outputs successfully.")
+    print("\nSaved all Mackey-Glass SC3 outputs successfully.")
 
 
 if __name__ == "__main__":

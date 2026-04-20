@@ -1,7 +1,7 @@
 """
-Mackey-Glass — Unconditional Variability Extraction, fixed reservoir.
+Mackey-Glass — Unconditional Variability Extraction, fixed Reservoir | Variable Read-in.
 Constraint Set 3: full input (no masking), near-zero read-in weights allowed.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os

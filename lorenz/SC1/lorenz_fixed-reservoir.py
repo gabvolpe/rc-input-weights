@@ -1,7 +1,7 @@
 """
-Lorenz — Unconditional Variability Extraction, fixed reservoir.
+Lorenz — Unconditional Variability Extraction, fixed Reservoir | Variable Read-in.
 Constraint Set 1: full input (no masking), no near-zero read-in weights.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 
 Optimizations:
 - Training subsampling

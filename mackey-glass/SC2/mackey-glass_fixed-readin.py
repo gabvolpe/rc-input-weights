@@ -1,7 +1,7 @@
 """
 Mackey-Glass — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
 Constraint Set 2: 50% input (50% masking), no near-zero read-in weights.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os
@@ -36,8 +36,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (read-in)") #50
-parser.add_argument("--n_inner", type=int, default=3,    help="Number of inner trials per read-in") #100
+parser.add_argument("--n_trials", type=int, default=50,     help="Number of outer trials (read-in)") 
+parser.add_argument("--n_inner",  type=int, default=100,    help="Number of inner trials per read-in") 
 
 parser.add_argument("--reservoir_nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.2)
@@ -236,7 +236,7 @@ def main():
             timeseries_records[k]
         )
 
-    print("\nSaved all Mackey-Glass SC1 outputs successfully.")
+    print("\nSaved all Mackey-Glass SC2 outputs successfully.")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
 Sine-to-Cosine^2 — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
 Constraint Set 2: 50% input (50% masking), no near-zero read-in weights.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os

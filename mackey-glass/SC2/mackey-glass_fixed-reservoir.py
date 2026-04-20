@@ -1,7 +1,7 @@
 """
-Mackey-Glass — Unconditional Variability Extraction, fixed reservoir.
+Mackey-Glass — Unconditional Variability Extraction, fixed Reservoir | Variable Read-in.
 Constraint Set 2: 50% input (50% masking), no near-zero read-in weights.
-Gaussian SD is fixed at 1.0; no SD optimisation is performed.
+Gaussian SD is fixed at 1.0.
 """
 
 import os
@@ -34,8 +34,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ----------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (reservoirs)") #50
-parser.add_argument("--n_inner", type=int,   default=3,    help="Number of inner trials per reservoir") #100
+parser.add_argument("--n_trials", type=int, default=50,     help="Number of outer trials (reservoirs)") 
+parser.add_argument("--n_inner",  type=int, default=100,    help="Number of inner trials per reservoir") 
 
 parser.add_argument("--reservoir_nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.2)

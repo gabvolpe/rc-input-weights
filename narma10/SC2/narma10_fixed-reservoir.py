@@ -50,8 +50,8 @@ EVAL_DISTS = list(DIST_MAP.keys())
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (reservoirs)")
-parser.add_argument("--n_inner",          type=int,   default=3,    help="Number of inner trials per reservoir")
+parser.add_argument("--n_trials", type=int, default=50,     help="Number of outer trials (reservoirs)")
+parser.add_argument("--n_inner",  type=int, default=100,    help="Number of inner trials per reservoir")
 parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
 parser.add_argument("--spectral_radius", type=float, default=0.9)
@@ -81,7 +81,7 @@ X_test  = X_test.astype(np.float32)
 y_train = y_train.astype(np.float32)
 y_test  = y_test.astype(np.float32)
 
-np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), y_test)
+np.save(os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"), y_test)
 
 # ------------------------------------------------------------
 # INNER RUN
@@ -202,22 +202,22 @@ def main():
     # ------------------------------------------------------------
     for eval_dist in EVAL_DISTS:
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{eval_dist}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_readin_weights_{eval_dist}.npy"),
             np.array(readin_store[eval_dist], dtype=object)
         )
 
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc1_timeseries_{eval_dist}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_timeseries_{eval_dist}.npy"),
             np.array(timeseries_store[eval_dist], dtype=object)
         )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_timeseries_gt.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_timeseries_gt.npy"),
         np.array(timeseries_store["gt"], dtype=object)
     )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_reservoir_weights.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_reservoir_weights.npy"),
         np.array(reservoir_store, dtype=object)
     )
 
