@@ -81,7 +81,7 @@ X_test  = X_test.astype(np.float32)
 y_train = y_train.astype(np.float32)
 y_test  = y_test.astype(np.float32)
 
-np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), y_test)
+np.save(os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"), y_test)
 
 # ------------------------------------------------------------
 # SAFE UNPACK (prevents future shape bugs)
@@ -240,22 +240,22 @@ def main():
     for d in EVAL_DISTS:
 
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{d}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_readin_weights_{d}.npy"),
             np.array(readin_store[d], dtype=object)
         )
 
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc1_timeseries_{d}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc2_timeseries_{d}.npy"),
             np.array(timeseries_store[d], dtype=object)
         )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_timeseries_gt.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_timeseries_gt.npy"),
         np.array(timeseries_store["gt"], dtype=object)
     )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc1_reservoir_index.npy"),
+        os.path.join(OUTPUT_DIR, "sc2_reservoir_index.npy"),
         np.array(reservoir_store, dtype=object)
     )
 
