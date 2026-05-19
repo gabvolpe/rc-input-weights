@@ -49,8 +49,8 @@ EVAL_DISTS = list(DIST_MAP.keys())
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_outer", type=int, default=50,     help="Number of outer trials (read-in)")
-parser.add_argument("--n_inner", type=int, default=100,    help="Number of inner trials per read-in")
+parser.add_argument("--n_outer", type=int, default=25,     help="Number of outer trials (read-in)")
+parser.add_argument("--n_inner", type=int, default=50,    help="Number of inner trials per read-in")
 
 parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
@@ -95,6 +95,8 @@ def to_1d(x):
 # INNER LOOP: variable reservoirs
 # ------------------------------------------------------------
 def run_inner(model_bytes, outer_id, inner_id, readin_sets):
+
+    print(f"  [Inner {inner_id+1}] running with fixed read-in sets")
 
     model = pickle.loads(model_bytes)
 
