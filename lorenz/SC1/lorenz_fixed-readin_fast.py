@@ -51,8 +51,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2, help="Outer trials = fixed read-ins")
-parser.add_argument("--n_inner",  type=int, default=2, help="Inner trials = variable reservoirs")
+parser.add_argument("--n_trials", type=int, default=10, help="Outer trials = fixed read-ins")
+parser.add_argument("--n_inner",  type=int, default=25, help="Inner trials = variable reservoirs")
 
 parser.add_argument("--reservoir_nodes",  type=int,   default=200)
 parser.add_argument("--density",          type=float, default=0.1)
@@ -72,7 +72,7 @@ args = parser.parse_args()
 GAUSS_SD  = 1.0
 THRESHOLD = args.readin_threshold if args.set_threshold else None
 
-dist_keys = ["uniform"] #, "gaussian", "double_gaussian", "laplace", "power_law"]
+dist_keys = ["uniform", "gaussian", "double_gaussian", "laplace", "power_law"]
 
 # ------------------------------------------------------------
 # TIMING ACCUMULATORS
