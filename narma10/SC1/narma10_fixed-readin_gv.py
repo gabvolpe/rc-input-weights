@@ -1,7 +1,19 @@
 """
 NARMA-10 — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
-Constraint Set 2: 50% input (50% masking), no near-zero read-in weights.
+Constraint Set 1: full input (no masking), no near-zero read-in weights.
 Gaussian SD fixed at 1.0.
+
+Memory-safe streaming version of NARMA-10 fixed Read-In | Variable Reservoir.
+
+This version streams:
+    sc1_timeseries_<dist>.npy
+    sc1_readin_weights_<dist>.npy
+    sc1_timeseries_gt.npy
+    sc1_reservoir_weights.npy
+
+through temporary files under:
+    outputs/fixed-readin/_temp_stream
+and merges them at the end to avoid RAM accumulation.
 """
 
 import os
@@ -56,7 +68,7 @@ parser.add_argument("--nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.4)
 parser.add_argument("--spectral_radius", type=float, default=0.9)
 parser.add_argument("--leakage_rate", type=float, default=0.2)
-parser.add_argument("--fraction_input", type=float, default=0.5)
+parser.add_argument("--fraction_input", type=float, default=1.0)
 parser.add_argument("--ridge_alpha", type=float, default=1e-6)
 
 parser.add_argument("--readin_threshold", type=float, default=1e-3)
@@ -81,7 +93,7 @@ X_test  = X_test.astype(np.float32)
 y_train = y_train.astype(np.float32)
 y_test  = y_test.astype(np.float32)
 
-np.save(os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"), y_test)
+np.save(os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"), y_test)
 
 # ------------------------------------------------------------
 # SAFE UNPACK (prevents future shape bugs)
@@ -240,22 +252,22 @@ def main():
     for d in EVAL_DISTS:
 
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc2_readin_weights_{d}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc1_readin_weights_{d}.npy"),
             np.array(readin_store[d], dtype=object)
         )
 
         np.save(
-            os.path.join(OUTPUT_DIR, f"sc2_timeseries_{d}.npy"),
+            os.path.join(OUTPUT_DIR, f"sc1_timeseries_{d}.npy"),
             np.array(timeseries_store[d], dtype=object)
         )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc2_timeseries_gt.npy"),
+        os.path.join(OUTPUT_DIR, "sc1_timeseries_gt.npy"),
         np.array(timeseries_store["gt"], dtype=object)
     )
 
     np.save(
-        os.path.join(OUTPUT_DIR, "sc2_reservoir_index.npy"),
+        os.path.join(OUTPUT_DIR, "sc1_reservoir_index.npy"),
         np.array(reservoir_store, dtype=object)
     )
 

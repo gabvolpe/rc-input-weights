@@ -2,6 +2,18 @@
 NARMA-10 — Unconditional Variability Extraction, fixed Read-In | Variable Reservoir.
 Constraint Set 3: full input (no masking), near-zero read-in weights allowed.
 Gaussian SD fixed at 1.0.
+
+Memory-safe streaming version of NARMA-10 fixed Read-In | Variable Reservoir.
+
+This version streams:
+    sc3_timeseries_<dist>.npy
+    sc3_readin_weights_<dist>.npy
+    sc3_timeseries_gt.npy
+    sc3_reservoir_weights.npy
+
+through temporary files under:
+    outputs/fixed-readin/_temp_stream
+and merges them at the end to avoid RAM accumulation.
 """
 
 import os
