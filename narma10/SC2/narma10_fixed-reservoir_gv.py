@@ -8,11 +8,11 @@ Intermediate results are streamed to temporary files during execution
 to avoid RAM accumulation. After completion, temporary files are
 merged back into the original output structure:
 
-    sc1_ground_truth.npy
-    sc1_timeseries_<dist>.npy
-    sc1_timeseries_gt.npy
-    sc1_readin_weights_<dist>.npy
-    sc1_reservoir_weights.npy
+    sc2_ground_truth.npy
+    sc2_timeseries_<dist>.npy
+    sc2_timeseries_gt.npy
+    sc2_readin_weights_<dist>.npy
+    sc2_reservoir_weights.npy
 """
 
 import os
@@ -128,7 +128,7 @@ y_test  = y_test.astype(np.float32)
 # SAVE GLOBAL GROUND TRUTH
 # ------------------------------------------------------------
 np.save(
-    os.path.join(OUTPUT_DIR, "sc1_ground_truth.npy"),
+    os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"),
     y_test
 )
 
@@ -289,7 +289,7 @@ def merge_timeseries(eval_dist):
     np.save(
         os.path.join(
             OUTPUT_DIR,
-            f"sc1_timeseries_{eval_dist}.npy"
+            f"sc2_timeseries_{eval_dist}.npy"
         ),
         np.array(merged, dtype=object)
     )
@@ -329,7 +329,7 @@ def merge_readins(eval_dist):
     np.save(
         os.path.join(
             OUTPUT_DIR,
-            f"sc1_readin_weights_{eval_dist}.npy"
+            f"sc2_readin_weights_{eval_dist}.npy"
         ),
         np.array(merged, dtype=object)
     )
@@ -369,7 +369,7 @@ def merge_gt():
     np.save(
         os.path.join(
             OUTPUT_DIR,
-            "sc1_timeseries_gt.npy"
+            "sc2_timeseries_gt.npy"
         ),
         np.array(merged, dtype=object)
     )
@@ -405,7 +405,7 @@ def merge_reservoirs():
     np.save(
         os.path.join(
             OUTPUT_DIR,
-            "sc1_reservoir_weights.npy"
+            "sc2_reservoir_weights.npy"
         ),
         np.array(merged, dtype=object)
     )
