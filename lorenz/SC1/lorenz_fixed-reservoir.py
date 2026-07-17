@@ -38,8 +38,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=2,     help="Number of outer trials (reservoirs)") #50
-parser.add_argument("--n_inner",          type=int,   default=2,    help="Number of inner trials per reservoir") #100
+parser.add_argument("--n_trials", type=int, default=100,     help="Number of outer trials (reservoirs)") #50
+parser.add_argument("--n_inner",          type=int,   default=50,    help="Number of inner trials per reservoir") #100
 
 parser.add_argument("--reservoir_nodes", type=int, default=200)  # reduced default
 parser.add_argument("--density", type=float, default=0.1)

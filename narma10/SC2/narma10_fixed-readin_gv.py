@@ -93,6 +93,16 @@ X_test  = X_test.astype(np.float32)
 y_train = y_train.astype(np.float32)
 y_test  = y_test.astype(np.float32)
 
+# select only firt 50 samples for speed
+X_train = X_train[:50, ...]
+y_train = y_train[:50, ...]
+X_test = X_test[:50, ...]
+y_test = y_test[:50, ...]
+
+print(f"shape of X-train: {X_train.shape}")
+print(f"shape of X-test: {X_test.shape}")
+
+
 np.save(os.path.join(OUTPUT_DIR, "sc2_ground_truth.npy"), y_test)
 
 # ------------------------------------------------------------
