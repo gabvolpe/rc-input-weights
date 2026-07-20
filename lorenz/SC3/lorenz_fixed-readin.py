@@ -161,6 +161,12 @@ def main():
 
     X_train, X_test, y_train, y_test = load_dataset("lorenz")
 
+    # select only firt 50 samples for speed
+    X_train = X_train[:50, ...]
+    y_train = y_train[:50, ...]
+    X_test = X_test[:50, ...]
+    y_test = y_test[:50, ...]
+
     readin_records = {k: [] for k in dist_keys}
     reservoir_records = []
     timeseries_records = {k: [] for k in dist_keys}

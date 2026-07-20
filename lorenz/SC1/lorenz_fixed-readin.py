@@ -47,8 +47,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ------------------------------------------------------------
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--n_trials", type=int, default=100, help="Outer trials = fixed read-ins") 
-parser.add_argument("--n_inner", type=int,  default=50, help="Inner trials = variable reservoirs") 
+parser.add_argument("--n_trials", type=int, default=50, help="Outer trials = fixed read-ins") 
+parser.add_argument("--n_inner", type=int,  default=100, help="Inner trials = variable reservoirs") 
 
 parser.add_argument("--reservoir_nodes", type=int, default=200)
 parser.add_argument("--density", type=float, default=0.1)
@@ -160,6 +160,12 @@ def main():
     np.random.seed(42)
 
     X_train, X_test, y_train, y_test = load_dataset("lorenz")
+
+    # select only firt 50 samples for speed
+    X_train = X_train[:50, ...]
+    y_train = y_train[:50, ...]
+    X_test = X_test[:50, ...]
+    y_test = y_test[:50, ...]
 
     readin_records = {k: [] for k in dist_keys}
     reservoir_records = []

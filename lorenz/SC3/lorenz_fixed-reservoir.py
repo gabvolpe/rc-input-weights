@@ -135,6 +135,12 @@ def main():
 
     X_train, X_test, y_train, y_test = load_dataset("lorenz")
 
+    # select only firt 50 samples for speed
+    X_train = X_train[:50, ...]
+    y_train = y_train[:50, ...]
+    X_test = X_test[:50, ...]
+    y_test = y_test[:50, ...]
+
     # SPEEDUP: subsample training data
     if len(X_train) > args.max_train_samples:
         idx = np.random.choice(len(X_train), args.max_train_samples, replace=False)
@@ -183,7 +189,7 @@ def main():
     # --------------------------------------------------------
     # SAVE EVERYTHING (same format as sin-to-cos2)
     # --------------------------------------------------------
-    
+
     np.save(os.path.join(OUTPUT_DIR, "sc3_ground_truth.npy"), y_test[0])
 
     outer = np.array([r[0] for r in reservoir_records])
